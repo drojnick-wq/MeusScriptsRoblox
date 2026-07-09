@@ -1,0 +1,362 @@
+--// ESP + AIMBOT - Droj Store (Sem Spider Car)
+--// Features: Wall Highlight, Name, Distance, Tracer, Aimbot (Head/Chest), FOV
+--// Theme: Dark/Purple, Scrolling Menu, Optimized Mobile
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+--// Configurações
+local aimbotEnabled = false
+local aimbotLevel = 5
+local fovSize = 100
+local aimTarget = "Cabeça"
+
+--// Estados das ESPs
+local espEnabled = {
+    WallChams = false,
+    Name = false,
+    Distance = false,
+    Tracer = false,
+}
+local espObjects = {}
+
+--// UTILITÁRIOS
+local function WorldToScreen(position)
+    local screenPoint, onScreen = Camera:WorldToViewportPoint(position)
+    return Vector2.new(screenPoint.X, screenPoint.Y), onScreen
+end
+
+local function GetDistance(pos1, pos2)
+    return (pos1 - pos2).Magnitude
+end
+
+local function GetTargetPart(player)
+    local char = player.Character
+    if not char then return nil end
+    if aimTarget == "Cabeça" then
+        return char:FindFirstChild("Head")
+    elseif aimTarget == "Peito" then
+        return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    end
+    return char:FindFirstChild("Head")
+end
+
+local function GetClosestPlayerToCrosshair()
+    local closestPlayer = nil
+    local closestDistance = fovSize
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local char = player.Character
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health <= 0 then continue end
+            local targetPart = GetTargetPart(player)
+            if targetPart then
+                local partPos, onScreen = WorldToScreen(targetPart.Position)
+                if onScreen then
+                    local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                    local distance = (partPos - mousePos).Magnitude
+                    if distance < closestDistance then
+                        closestDistance = distance
+                        closestPlayer = player
+                    end
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+--// AIMBOT LOOP
+RunService.RenderStepped:Connect(function()
+    if aimbotEnabled then
+        local target = GetClosestPlayerToCrosshair()
+        if target then
+            local targetPart = GetTargetPart(target)
+            if targetPart then
+                local targetPos = targetPart.Position
+                if aimbotLevel == 10 then
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+                else
+                    local smoothness = 1 - (aimbotLevel / 10)
+                    if smoothness < 0.05 then smoothness = 0.05 end
+                    local currentPos = Camera.CFrame.Position
+                    local lookVector = (targetPos - currentPos).Unit
+                    local newCFrame = CFrame.new(currentPos, currentPos + lookVector)
+                    Camera.CFrame = Camera.CFrame:Lerp(newCFrame, 1 - smoothness)
+                end
+            end
+        end
+    end
+end)
+
+--// CRIAÇÃO DAS ESPS
+local function CreateHighlightForPlayer(player)
+    if player == LocalPlayer then return end
+    local char = player.Character
+    if not char then return end
+    local oldHL = char:FindFirstChild("ESP_Highlight")
+    if oldHL then oldHL:Destroy() end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ESP_Highlight"
+    highlight.Adornee = char
+    highlight.FillColor = Color3.fromRGB(170, 0, 255)
+    highlight.OutlineColor = Color3.fromRGB(170, 0, 255)
+    highlight.FillTransparency = 0.85
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = char
+    return highlight
+end
+
+local function CreateESPForPlayer(player)
+    if player == LocalPlayer then return end
+    if espObjects[player] then return end
+    local drawings = {
+        Name = Drawing.new("Text"),
+        Distance = Drawing.new("Text"),
+        Tracer = Drawing.new("Line"),
+    }
+    drawings.Name.Size = 16; drawings.Name.Center = true; drawings.Name.Outline = true; drawings.Name.Color = Color3.fromRGB(170, 0, 255); drawings.Name.Visible = false
+    drawings.Distance.Size = 14; drawings.Distance.Center = true; drawings.Distance.Outline = true; drawings.Distance.Color = Color3.fromRGB(170, 0, 255); drawings.Distance.Visible = false
+    drawings.Tracer.Thickness = 1; drawings.Tracer.Color = Color3.fromRGB(170, 0, 255); drawings.Tracer.Visible = false
+    espObjects[player] = drawings
+end
+
+--// LOOP DE ATUALIZAÇÃO DAS ESPs E FOV
+local fovCircle = Drawing.new("Circle")
+fovCircle.Radius = fovSize
+fovCircle.Color = Color3.fromRGB(170, 0, 255)
+fovCircle.Thickness = 2
+fovCircle.Filled = false
+fovCircle.Visible = false
+
+RunService.RenderStepped:Connect(function()
+    if aimbotEnabled then
+        fovCircle.Visible = true
+        fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        fovCircle.Radius = fovSize
+    else
+        fovCircle.Visible = false
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            if not espObjects[player] then CreateESPForPlayer(player) end
+            local drawings = espObjects[player]
+            if not drawings then continue end
+            local char = player.Character
+            if not char or (char:FindFirstChildOfClass("Humanoid") and char:FindFirstChildOfClass("Humanoid").Health <= 0) then
+                drawings.Name.Visible = false; drawings.Distance.Visible = false; drawings.Tracer.Visible = false
+                if char then
+                    local hl = char:FindFirstChild("ESP_Highlight")
+                    if hl then hl:Destroy() end
+                end
+                continue
+            end
+            if espEnabled.WallChams then
+                if char then
+                    local hl = char:FindFirstChild("ESP_Highlight")
+                    if not hl then CreateHighlightForPlayer(player) end
+                end
+            else
+                if char then
+                    local hl = char:FindFirstChild("ESP_Highlight")
+                    if hl then hl:Destroy() end
+                end
+            end
+            local root = char:FindFirstChild("HumanoidRootPart")
+            local head = char:FindFirstChild("Head")
+            if not root or not head then continue end
+            local headScreen, onScreen = WorldToScreen(head.Position)
+            local rootScreen, _ = WorldToScreen(root.Position)
+            local dist = GetDistance(LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart").Position or root.Position, root.Position)
+            if espEnabled.Tracer and onScreen then
+                local bottomScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                drawings.Tracer.From = bottomScreen; drawings.Tracer.To = headScreen; drawings.Tracer.Visible = true
+            else
+                drawings.Tracer.Visible = false
+            end
+            if espEnabled.Name and onScreen then
+                drawings.Name.Text = player.Name
+                drawings.Name.Position = Vector2.new(headScreen.X, headScreen.Y - 40); drawings.Name.Visible = true
+            else
+                drawings.Name.Visible = false
+            end
+            if espEnabled.Distance and onScreen then
+                drawings.Distance.Text = string.format("%.1f m", dist)
+                drawings.Distance.Position = Vector2.new(rootScreen.X, rootScreen.Y + 20); drawings.Distance.Visible = true
+            else
+                drawings.Distance.Visible = false
+            end
+        end
+    end
+end)
+
+--// GUI CONSTRUCTION
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ESP_Menu"
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+--// BOTÃO D
+local btnOpen = Instance.new("TextButton")
+btnOpen.Size = UDim2.new(0, 50, 0, 50)
+btnOpen.Position = UDim2.new(0.05, 0, 0.15, 0) 
+btnOpen.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+btnOpen.Text = "D"
+btnOpen.TextColor3 = Color3.fromRGB(170, 0, 255)
+btnOpen.Font = Enum.Font.GothamBold
+btnOpen.TextSize = 28
+btnOpen.ZIndex = 2
+btnOpen.Parent = ScreenGui
+local UICornerD = Instance.new("UICorner"); UICornerD.CornerRadius = UDim.new(1, 0); UICornerD.Parent = btnOpen
+
+local dragBtn, dragInputBtn, dragStartBtn, startPosBtn = false
+btnOpen.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragBtn = true; dragStartBtn = input.Position; startPosBtn = btnOpen.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragBtn = false end end)
+    end
+end)
+btnOpen.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInputBtn = input end end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInputBtn and dragBtn then
+        local delta = input.Position - dragStartBtn
+        btnOpen.Position = UDim2.new(startPosBtn.X.Scale, startPosBtn.X.Offset + delta.X, startPosBtn.Y.Scale, startPosBtn.Y.Offset + delta.Y)
+    end
+end)
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 280, 0, 430)
+MainFrame.Position = UDim2.new(0.5, -140, 0.2, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 2
+MainFrame.BorderColor3 = Color3.fromRGB(170, 0, 255)
+MainFrame.Visible = false 
+MainFrame.Parent = ScreenGui
+local UICorner = Instance.new("UICorner"); UICorner.CornerRadius = UDim.new(0, 8); UICorner.Parent = MainFrame
+
+local ScrollingFrame = Instance.new("ScrollingFrame")
+ScrollingFrame.Size = UDim2.new(1, 0, 1, -55)
+ScrollingFrame.Position = UDim2.new(0, 0, 0, 55)
+ScrollingFrame.BackgroundTransparency = 1
+ScrollingFrame.BorderSizePixel = 0
+ScrollingFrame.ScrollBarThickness = 4
+ScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(170, 0, 255)
+ScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ScrollingFrame.Parent = MainFrame
+
+local ContentList = Instance.new("UIListLayout"); ContentList.SortOrder = Enum.SortOrder.LayoutOrder; ContentList.Padding = UDim.new(0, 5); ContentList.Parent = ScrollingFrame
+local Padding = Instance.new("UIPadding"); Padding.PaddingTop = UDim.new(0, 10); Padding.PaddingLeft = UDim.new(0, 10); Padding.PaddingRight = UDim.new(0, 10); Padding.Parent = ScrollingFrame
+
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 55)
+Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+
+local StoreTitle = Instance.new("TextLabel")
+StoreTitle.Size = UDim2.new(1, 0, 0, 25); StoreTitle.Position = UDim2.new(0, 0, 0, 2); StoreTitle.BackgroundTransparency = 1; StoreTitle.Text = "DROJ STORE"; StoreTitle.TextColor3 = Color3.fromRGB(170, 0, 255); StoreTitle.Font = Enum.Font.GothamBold; StoreTitle.TextSize = 18; StoreTitle.Parent = Header
+
+local MenuTitle = Instance.new("TextLabel")
+MenuTitle.Size = UDim2.new(1, 0, 0, 20); MenuTitle.Position = UDim2.new(0, 0, 0, 28); MenuTitle.BackgroundTransparency = 1; MenuTitle.Text = "ESP Menu"; MenuTitle.TextColor3 = Color3.new(1, 1, 1); MenuTitle.Font = Enum.Font.Gotham; MenuTitle.TextSize = 14; MenuTitle.Parent = Header
+
+--// DRAG DO MENU
+local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
+Header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+Header.InputChanged:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+--// TOGGLES
+local function CreateToggle(name, labelText)
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Size = UDim2.new(1, 0, 0, 30)
+    toggleFrame.BackgroundTransparency = 1
+    toggleFrame.Parent = ScrollingFrame
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 140, 1, 0); label.Position = UDim2.new(0, 0, 0, 0); label.BackgroundTransparency = 1; label.Text = labelText; label.TextColor3 = Color3.new(1,1,1); label.TextXAlignment = Enum.TextXAlignment.Left; label.Font = Enum.Font.Gotham; label.TextSize = 14; label.Parent = toggleFrame
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 60, 0, 20); button.Position = UDim2.new(1, -60, 0.5, -10); button.BackgroundColor3 = Color3.fromRGB(40, 40, 40); button.Text = "OFF"; button.TextColor3 = Color3.new(1,0,0); button.Font = Enum.Font.GothamBold; button.TextSize = 12; button.Parent = toggleFrame
+    local state = false
+    local function updateButton()
+        if state then
+            button.Text = "ON"; button.TextColor3 = Color3.new(0,1,0); button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        else
+            button.Text = "OFF"; button.TextColor3 = Color3.new(1,0,0); button.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        end
+        if name == "Aimbot" then aimbotEnabled = state end
+        espEnabled[name] = state
+    end
+    updateButton()
+    button.MouseButton1Click:Connect(function() state = not state; updateButton() end)
+end
+
+local function CreateNumericControl(titleText, minVal, maxVal, step, initialVal)
+    local controlFrame = Instance.new("Frame")
+    controlFrame.Size = UDim2.new(1, 0, 0, 35)
+    controlFrame.BackgroundTransparency = 1
+    controlFrame.Parent = ScrollingFrame
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 150, 0, 20); label.Position = UDim2.new(0, 0, 0, 0); label.BackgroundTransparency = 1; label.Text = titleText; label.TextColor3 = Color3.new(1,1,1); label.TextXAlignment = Enum.TextXAlignment.Left; label.Font = Enum.Font.Gotham; label.TextSize = 14; label.Parent = controlFrame
+    local numLabel = Instance.new("TextLabel")
+    numLabel.Size = UDim2.new(0, 30, 0, 20); numLabel.Position = UDim2.new(1, -85, 0, 0); numLabel.BackgroundTransparency = 1; numLabel.Text = tostring(initialVal); numLabel.TextColor3 = Color3.fromRGB(170, 0, 255); numLabel.TextXAlignment = Enum.TextXAlignment.Right; numLabel.Font = Enum.Font.GothamBold; numLabel.TextSize = 16; numLabel.Parent = controlFrame
+    local btnMinus = Instance.new("TextButton")
+    btnMinus.Size = UDim2.new(0, 25, 0, 25); btnMinus.Position = UDim2.new(1, -50, 0, 5); btnMinus.BackgroundColor3 = Color3.fromRGB(40, 40, 40); btnMinus.Text = "-"; btnMinus.TextColor3 = Color3.new(1,1,1); btnMinus.Font = Enum.Font.GothamBold; btnMinus.TextSize = 16; btnMinus.Parent = controlFrame
+    local btnPlus = Instance.new("TextButton")
+    btnPlus.Size = UDim2.new(0, 25, 0, 25); btnPlus.Position = UDim2.new(1, -25, 0, 5); btnPlus.BackgroundColor3 = Color3.fromRGB(40, 40, 40); btnPlus.Text = "+"; btnPlus.TextColor3 = Color3.new(1,1,1); btnPlus.Font = Enum.Font.GothamBold; btnPlus.TextSize = 16; btnPlus.Parent = controlFrame
+    if titleText == "Nível Aimbot" then
+        btnPlus.MouseButton1Click:Connect(function() if aimbotLevel + step <= maxVal then aimbotLevel = aimbotLevel + step; numLabel.Text = tostring(aimbotLevel) end end)
+        btnMinus.MouseButton1Click:Connect(function() if aimbotLevel - step >= minVal then aimbotLevel = aimbotLevel - step; numLabel.Text = tostring(aimbotLevel) end end)
+    elseif titleText == "Tamanho FOV" then
+        btnPlus.MouseButton1Click:Connect(function() if fovSize + step <= maxVal then fovSize = fovSize + step; numLabel.Text = tostring(fovSize) end end)
+        btnMinus.MouseButton1Click:Connect(function() if fovSize - step >= minVal then fovSize = fovSize - step; numLabel.Text = tostring(fovSize) end end)
+    end
+end
+
+local function CreateBodyPartSelection()
+    local selectFrame = Instance.new("Frame")
+    selectFrame.Size = UDim2.new(1, 0, 0, 35); selectFrame.BackgroundTransparency = 1; selectFrame.Parent = ScrollingFrame
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 150, 0, 20); label.Position = UDim2.new(0, 0, 0, 0); label.BackgroundTransparency = 1; label.Text = "Mira no Corpo:"; label.TextColor3 = Color3.new(1,1,1); label.TextXAlignment = Enum.TextXAlignment.Left; label.Font = Enum.Font.Gotham; label.TextSize = 14; label.Parent = selectFrame
+    local dropdown = Instance.new("TextButton")
+    dropdown.Size = UDim2.new(0, 90, 0, 25); dropdown.Position = UDim2.new(1, -95, 0, 5); dropdown.BackgroundColor3 = Color3.fromRGB(40, 40, 40); dropdown.Text = aimTarget; dropdown.TextColor3 = Color3.fromRGB(170, 0, 255); dropdown.Font = Enum.Font.GothamBold; dropdown.TextSize = 12; dropdown.Parent = selectFrame
+    local options = {"Cabeça", "Peito"}; local currentIndex = 1
+    dropdown.MouseButton1Click:Connect(function() currentIndex = currentIndex + 1; if currentIndex > #options then currentIndex = 1 end; aimTarget = options[currentIndex]; dropdown.Text = aimTarget end)
+end
+
+--// MONTAGEM
+CreateToggle("WallChams", "Fantasma (Borda)")
+CreateToggle("Name", "Nome")
+CreateToggle("Distance", "Distância")
+CreateToggle("Tracer", "Tracer")
+
+local sepLabel1 = Instance.new("TextLabel")
+sepLabel1.Size = UDim2.new(1, 0, 0, 20); sepLabel1.BackgroundTransparency = 1; sepLabel1.Text = "=== AIMBOT ==="; sepLabel1.TextColor3 = Color3.fromRGB(170, 0, 255); sepLabel1.Font = Enum.Font.GothamBold; sepLabel1.TextSize = 14; sepLabel1.Parent = ScrollingFrame
+CreateToggle("Aimbot", "Ativar Aimbot")
+CreateNumericControl("Nível Aimbot", 1, 10, 1, aimbotLevel)
+CreateNumericControl("Tamanho FOV", 10, 500, 5, fovSize)
+CreateBodyPartSelection()
+
+local FooterFrame = Instance.new("Frame"); FooterFrame.Size = UDim2.new(1, -10, 0, 80); FooterFrame.BackgroundTransparency = 1; FooterFrame.Parent = ScrollingFrame
+local DiscordSymbol = Instance.new("TextLabel"); DiscordSymbol.Size = UDim2.new(0, 25, 0, 25); DiscordSymbol.Position = UDim2.new(0, 0, 0, 0); DiscordSymbol.BackgroundTransparency = 1; DiscordSymbol.Text = "D"; DiscordSymbol.TextColor3 = Color3.fromRGB(255, 255, 255); DiscordSymbol.Font = Enum.Font.GothamBold; DiscordSymbol.TextSize = 20; DiscordSymbol.Parent = FooterFrame
+local DiscordBtn = Instance.new("TextButton"); DiscordBtn.Size = UDim2.new(1, -35, 0, 25); DiscordBtn.Position = UDim2.new(0, 30, 0, 0); DiscordBtn.BackgroundTransparency = 1; DiscordBtn.Text = "https://discord.gg/qvBQGzYVu"; DiscordBtn.TextColor3 = Color3.fromRGB(170, 0, 255); DiscordBtn.TextXAlignment = Enum.TextXAlignment.Left; DiscordBtn.Font = Enum.Font.GothamBold; DiscordBtn.TextSize = 12; DiscordBtn.Parent = FooterFrame
+DiscordBtn.MouseButton1Click:Connect(function() setclipboard("https://discord.gg/qvBQGzYVu") end)
+local NickLabel = Instance.new("TextLabel"); NickLabel.Size = UDim2.new(1, 0, 0, 20); NickLabel.Position = UDim2.new(0, 0, 0, 35); NickLabel.BackgroundTransparency = 1; NickLabel.Text = "DROJ STORE"; NickLabel.TextColor3 = Color3.fromRGB(170, 0, 255); NickLabel.TextXAlignment = Enum.TextXAlignment.Left; NickLabel.Font = Enum.Font.GothamBold; NickLabel.TextSize = 16; NickLabel.Parent = FooterFrame
+
+btnOpen.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
+
+print("Droj Store ESP + Aimbot Carregado! (Sem Spider Car)")
