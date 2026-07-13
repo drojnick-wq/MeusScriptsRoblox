@@ -1,0 +1,167 @@
+-- Mover Blocks V20 (VERSÃO FÍSICA REAL - Anti-Objeto Visual)
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Interface (GUI)
+local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+ScreenGui.Name = "MoverBlocksV20_FisicaReal"
+ScreenGui.ResetOnSpawn = false
+
+-- Variáveis de controle
+local Alvo = nil
+local ConexaoMover = nil
+local DistanciaSegurar = 18
+
+-- Botões no Lado Direito
+local BtnPegar = Instance.new("TextButton", ScreenGui)
+BtnPegar.Size = UDim2.new(0, 150, 0, 50)
+BtnPegar.Position = UDim2.new(1, -180, 0.5, -60)
+BtnPegar.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+BtnPegar.Text = "PEGA"
+BtnPegar.TextColor3 = Color3.fromRGB(255, 255, 255)
+BtnPegar.Font = Enum.Font.SourceSansBold
+BtnPegar.TextSize = 20
+BtnPegar.ZIndex = 2
+
+local BtnTacar = Instance.new("TextButton", ScreenGui)
+BtnTacar.Size = UDim2.new(0, 150, 0, 50)
+BtnTacar.Position = UDim2.new(1, -180, 0.5, 0)
+BtnTacar.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+BtnTacar.Text = "TACAR"
+BtnTacar.TextColor3 = Color3.fromRGB(255, 255, 255)
+BtnTacar.Font = Enum.Font.SourceSansBold
+BtnTacar.TextSize = 20
+BtnTacar.Visible = false
+BtnTacar.ZIndex = 2
+
+Instance.new("UICorner", BtnPegar).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", BtnTacar).CornerRadius = UDim.new(0, 10)
+
+-- Sistema para Mover os Botões (Drag)
+local function TornarMovel(InstanciaBotao)
+	local Arrastando, EntradaArraste, PosicaoInicial, PosicaoFrameInicial
+	InstanciaBotao.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			Arrastando = true
+			PosicaoInicial = input.Position
+			PosicaoFrameInicial = InstanciaBotao.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then Arrastando = false end
+			end)
+		end
+	end)
+	InstanciaBotao.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then EntradaArraste = input end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if input == EntradaArraste and Arrastando then
+			local Delta = input.Position - PosicaoInicial
+			InstanciaBotao.Position = UDim2.new(PosicaoFrameInicial.X.Scale, PosicaoFrameInicial.X.Offset + Delta.X, PosicaoFrameInicial.Y.Scale, PosicaoFrameInicial.Y.Offset + Delta.Y)
+		end
+	end)
+end
+TornarMovel(BtnPegar)
+TornarMovel(BtnTacar)
+
+-- Função para escanear a mira e pegar a parte física real (Não a visual)
+local function ObterObjetoMira()
+	local Raio = Ray.new(Camera.CFrame.Position, Camera.CFrame.LookVector * 150)
+	local HitPart, HitPosition = workspace:FindPartOnRayWithIgnoreList(Raio, {LocalPlayer.Character})
+	
+	if HitPart then
+		-- Ignora partes puramente visuais/transparentes do mapa
+		if HitPart.Transparency > 0.8 and HitPart.CanCollide == false then return nil end
+		
+		-- Se for um Player
+		local Model = HitPart:FindFirstAncestorOfClass("Model")
+		if Model and Model:FindFirstChildOfClass("Humanoid") then
+			return Model:FindFirstChild("HumanoidRootPart") or Model:FindFirstChild("Torso")
+		end
+		
+		-- Se for um Carro, procura o "Body" ou a parte física central (ex: DriveSeat ou Chassis)
+		if not HitPart.Anchored then
+			local ModeloCarro = HitPart:FindFirstAncestorOfClass("Model")
+			if ModeloCarro then
+				-- Procura assento do motorista ou a peça com maior massa (física do servidor)
+				local Principal = ModeloCarro:FindFirstChildWhichIsA("VehicleSeat") or ModeloCarro:FindFirstChildWhichIsA("DriveSeat") or ModeloCarro:FindFirstChildWhichIsA("BasePart")
+				if Principal and not Principal.Anchored then return Principal end
+			end
+			return HitPart
+		end
+	end
+	return nil
+end
+
+-- Ativa a movimentação baseada em velocidade pura (Replica para o Servidor)
+local function IniciarFlutuacaoFisica(objeto)
+	Alvo = objeto
+	
+	-- Mantém o objeto flutuando calculando a velocidade necessária para alcançar a mira
+	ConexaoMover = RunService.Heartbeat:Connect(function()
+		if Alvo and Alvo.Parent and Alvo:IsA("BasePart") then
+			-- Posição ideal na frente da câmera
+			local PosicaoDesejada = (Camera.CFrame * CFrame.new(0, 0, -DistanciaSegurar)).Position
+			
+			-- Calcula a distância e a direção entre o carro e a mira
+			local VetorDistancia = PosicaoDesejada - Alvo.Position
+			
+			-- Altera a velocidade linear diretamente para arrastar o bloco físico real
+			-- Multiplicador 35 garante reação rápida sem quebrar o motor do jogo
+			Alvo.AssemblyLinearVelocity = VetorDistancia * 35
+			Alvo.AssemblyAngularVelocity = Vector3.new(0, 0, 0) -- Previne rotações loucas
+			
+			-- Truque anti-gravidade física: joga a velocidade para cima se o carro começar a cair
+			if Alvo.AssemblyLinearVelocity.Y < 0 then
+				Alvo.AssemblyLinearVelocity = Alvo.AssemblyLinearVelocity + Vector3.new(0, 10, 0)
+			end
+		else
+			SoltarObjeto()
+		end
+	end)
+end
+
+function SoltarObjeto()
+	if ConexaoMover then ConexaoMover:Disconnect() ConexaoMover = nil end
+	Alvo = nil
+	BtnPegar.Text = "PEGA"
+	BtnPegar.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+	BtnTacar.Visible = false
+end
+
+-- Ação dos Botões
+BtnPegar.MouseButton1Click:Connect(function()
+	if BtnPegar.Text == "PEGA" then
+		local ObjetoDetectado = ObterObjetoMira()
+		if ObjetoDetectado then
+			IniciarFlutuacaoFisica(ObjetoDetectado)
+			BtnPegar.Text = "SOLTA"
+			BtnPegar.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+			BtnTacar.Visible = true
+		end
+	else
+		SoltarObjeto()
+	end
+end)
+
+BtnTacar.MouseButton1Click:Connect(function()
+	if Alvo and Alvo:IsA("BasePart") then
+		local ObjetoArremesso = Alvo
+		local Direcao = Camera.CFrame.LookVector
+		
+		-- Finaliza o modo de puxar imediatamente
+		if ConexaoMover then ConexaoMover:Disconnect() ConexaoMover = nil end
+		Alvo = nil
+		
+		-- Arremesso baseado em Força de Impulso Físico Total (Valor 750 para carros super pesados)
+		task.wait(0.01)
+		ObjetoArremesso.AssemblyLinearVelocity = Direcao * 750
+		
+		BtnPegar.Text = "PEGA"
+		BtnPegar.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+		BtnTacar.Visible = false
+	end
+end)
+
