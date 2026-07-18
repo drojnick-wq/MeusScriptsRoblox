@@ -1,0 +1,142 @@
+-- =====================================================================
+-- DROJ STORE - VFLY V9 (TEMA ROXO E DARK COMPLETO) - FIX DIREÇÃO MOBILE
+-- =====================================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local DROJ_PURPLE = Color3.fromRGB(130, 0, 255)
+local DARK_BG = Color3.fromRGB(12, 12, 16)
+
+if game.CoreGui:FindFirstChild("DrojStoreVFly") then 
+    game.CoreGui.DrojStoreVFly:Destroy() 
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DrojStoreVFly"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = game.CoreGui
+
+local VflyEnabled, FlySpeed, CurrentVehicle, BodyVel, BodyGyro = false, 60, nil, nil, nil
+local inputs = { Gas = false, Re = false }
+
+local function MakeDraggable(f)
+    f.Active = true; f.Draggable = true 
+end
+
+-- BOTÃO D ROXO
+local ToggleButton = Instance.new("TextButton", ScreenGui)
+ToggleButton.Size, ToggleButton.Position = UDim2.new(0, 45, 0, 45), UDim2.new(0.05, 0, 0.25, 0)
+ToggleButton.BackgroundColor3, ToggleButton.Text, ToggleButton.TextColor3 = Color3.fromRGB(15, 15, 15), "D", DROJ_PURPLE
+ToggleButton.Font, ToggleButton.TextSize = Enum.Font.GothamBold, 24
+local ToggleCorner = Instance.new("UICorner", ToggleButton)
+ToggleCorner.CornerRadius = UDim.new(1, 0)
+MakeDraggable(ToggleButton)
+
+-- MENU ROXO
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size, MainFrame.Position, MainFrame.BackgroundColor3 = UDim2.new(0, 160, 0, 110), UDim2.new(0.5, -80, 0.35, -55), DARK_BG
+MainFrame.Visible = false
+local MainCorner = Instance.new("UICorner", MainFrame)
+MainCorner.CornerRadius = UDim.new(0, 8)
+
+local MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Color = DROJ_PURPLE
+MainStroke.Thickness = 2
+MakeDraggable(MainFrame)
+
+-- TÍTULO
+local TitleLabel = Instance.new("TextLabel", MainFrame)
+TitleLabel.Size = UDim2.new(1, 0, 0, 25)
+TitleLabel.Text = "DROJ STORE"
+TitleLabel.TextColor3 = DROJ_PURPLE
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextSize = 14
+TitleLabel.BackgroundTransparency = 1
+
+local SpeedInput = Instance.new("TextBox", MainFrame)
+SpeedInput.Size, SpeedInput.Position = UDim2.new(0, 110, 0, 24), UDim2.new(0.5, -55, 0, 35)
+SpeedInput.Text = "60"; SpeedInput.BackgroundColor3 = Color3.fromRGB(20, 20, 25); SpeedInput.TextColor3 = DROJ_PURPLE
+local SpeedCorner = Instance.new("UICorner", SpeedInput)
+SpeedCorner.CornerRadius = UDim.new(0, 4)
+
+local VflyButton = Instance.new("TextButton", MainFrame)
+VflyButton.Size, VflyButton.Position = UDim2.new(0, 130, 0, 26), UDim2.new(0.5, -65, 0, 72)
+VflyButton.Text, VflyButton.BackgroundColor3, VflyButton.TextColor3 = "VFLY: OFF", DROJ_PURPLE, Color3.fromRGB(255, 255, 255)
+local VflyCorner = Instance.new("UICorner", VflyButton)
+VflyCorner.CornerRadius = UDim.new(0, 5)
+
+ToggleButton.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
+SpeedInput.FocusLost:Connect(function() FlySpeed = tonumber(SpeedInput.Text) or 60 end)
+
+-- CONTROLES ROXOS
+local ControlsFrame = Instance.new("Frame", ScreenGui)
+ControlsFrame.Size, ControlsFrame.BackgroundTransparency, ControlsFrame.Visible = UDim2.new(1, 0, 1, 0), 1, false
+
+local function createBtn(n, t, p)
+    local b = Instance.new("TextButton", ControlsFrame)
+    b.Text, b.Position, b.Size = t, p, UDim2.new(0, 90, 0, 70)
+    b.BackgroundColor3 = Color3.fromRGB(25, 25, 30); b.TextColor3 = DROJ_PURPLE; b.Font = Enum.Font.GothamBold
+    local btnCorner = Instance.new("UICorner", b)
+    btnCorner.CornerRadius = UDim.new(0, 12)
+    
+    local btnStroke = Instance.new("UIStroke", b)
+    btnStroke.Color = DROJ_PURPLE
+    btnStroke.Thickness = 2
+    
+    b.MouseButton1Down:Connect(function() inputs[n] = true end)
+    b.MouseButton1Up:Connect(function() inputs[n] = false end)
+end
+createBtn("Gas", "GÁS", UDim2.new(0.8, 0, 0.65, 0))
+createBtn("Re", "RÉ", UDim2.new(0.7, 0, 0.72, 0))
+
+VflyButton.MouseButton1Click:Connect(function()
+    VflyEnabled = not VflyEnabled
+    ControlsFrame.Visible = VflyEnabled
+    VflyButton.Text = VflyEnabled and "VFLY: ON" or "VFLY: OFF"
+    if VflyEnabled then
+        local seat = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") and LocalPlayer.Character.Humanoid.SeatPart
+        if seat then
+            CurrentVehicle = seat
+            
+            -- Cria a força de velocidade linear
+            BodyVel = Instance.new("BodyVelocity")
+            BodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            BodyVel.Parent = seat
+            
+            -- Cria o estabilizador de mira
+            BodyGyro = Instance.new("BodyGyro")
+            BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+            BodyGyro.P = 500000 -- Força aumentada para ignorar a rotação nativa do carro
+            BodyGyro.Parent = seat
+        end
+    else
+        if BodyVel then BodyVel:Destroy() end
+        if BodyGyro then BodyGyro:Destroy() end
+        CurrentVehicle = nil
+    end
+end)
+
+-- LOOP TOTALMENTE CORRIGIDO PARA ALINHAMENTO DA CÂMERA
+RunService.RenderStepped:Connect(function()
+    if VflyEnabled and CurrentVehicle and CurrentVehicle.Parent then
+        -- Cancela os giros provocados pelo motor e físicas do jogo
+        CurrentVehicle.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        
+        -- Alinha rigidamente a rotação do carro com a direção da câmera em 3D
+        BodyGyro.CFrame = Camera.CFrame
+        
+        -- Aplica os movimentos baseados para onde a câmera está apontada
+        if inputs.Gas then
+            BodyVel.Velocity = Camera.CFrame.LookVector * FlySpeed
+        elseif inputs.Re then
+            BodyVel.Velocity = Camera.CFrame.LookVector * -FlySpeed
+        else
+            -- Garante o carro totalmente travado no ar ao soltar os botões
+            BodyVel.Velocity = Vector3.new(0, 0, 0)
+        end
+    end
+end)
+
