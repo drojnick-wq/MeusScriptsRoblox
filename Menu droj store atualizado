@@ -1,0 +1,648 @@
+--// ESP + AIMBOT - Droj Store
+--// Features: Wall Highlight, Name, Distance, TeamCheck, Aimbot, FOV
+--// + ResoluÃ§Ã£o (1-200) + Lista de Players com Pesquisa
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local hasDrawing = pcall(function() return Drawing.new("Circle") end)
+
+--// Config
+local aimbotEnabled = false
+local aimbotLevel = 5
+local fovSize = 100
+local aimTarget = "CabeÃ§a"
+local teamCheckEnabled = false
+local ignoredPlayers = {}
+local panelScale = 100
+
+local espEnabled = { WallChams = false, Name = false, Distance = false }
+local espObjects = {}
+
+--// Utils
+local function IsSameTeam(player)
+    if not teamCheckEnabled then return false end
+    if not player or not player.Team then return false end
+    if not LocalPlayer.Team then return false end
+    return player.Team == LocalPlayer.Team
+end
+
+local function IsIgnored(player) return ignoredPlayers[player] == true end
+
+local function WorldToScreen(position)
+    local sp, onScreen = Camera:WorldToViewportPoint(position)
+    if sp.Z <= 0 then return Vector2.new(sp.X, sp.Y), false end
+    return Vector2.new(sp.X, sp.Y), onScreen
+end
+
+local function GetDistance(a, b) return (a - b).Magnitude end
+
+local function GetTargetPart(player)
+    local char = player.Character
+    if not char then return nil end
+    if aimTarget == "CabeÃ§a" then return char:FindFirstChild("Head") end
+    return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+end
+
+local function GetLocalRoot()
+    if not LocalPlayer.Character then return nil end
+    return LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetClosestPlayerToCrosshair()
+    local closest, closestDist = nil, fovSize
+    local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if not IsSameTeam(player) and not IsIgnored(player) then
+                local char = player.Character
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if not hum or hum.Health > 0 then
+                    local tp = GetTargetPart(player)
+                    if tp then
+                        local pos, onScreen = WorldToScreen(tp.Position)
+                        if onScreen then
+                            local d = (pos - mousePos).Magnitude
+                            if d < closestDist then
+                                closestDist = d
+                                closest = player
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+--// Aimbot
+RunService.RenderStepped:Connect(function()
+    if not aimbotEnabled then return end
+    local target = GetClosestPlayerToCrosshair()
+    if not target then return end
+    local tp = GetTargetPart(target)
+    if not tp then return end
+    local targetPos = tp.Position
+    if aimbotLevel >= 10 then
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+    else
+        local smooth = aimbotLevel / 10
+        if smooth < 0.05 then smooth = 0.05 end
+        local cp = Camera.CFrame.Position
+        local lv = (targetPos - cp).Unit
+        Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(cp, cp + lv), smooth)
+    end
+end)
+
+--// ESP
+local function CreateHighlightForPlayer(player)
+    if player == LocalPlayer then return end
+    local char = player.Character
+    if not char then return end
+    local old = char:FindFirstChild("ESP_Highlight")
+    if old then old:Destroy() end
+    local hl = Instance.new("Highlight")
+    hl.Name = "ESP_Highlight"
+    hl.Adornee = char
+    hl.FillColor = Color3.fromRGB(170, 0, 255)
+    hl.OutlineColor = Color3.fromRGB(170, 0, 255)
+    hl.FillTransparency = 0.85
+    hl.OutlineTransparency = 0
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = char
+end
+
+local function CreateESPForPlayer(player)
+    if player == LocalPlayer then return end
+    if espObjects[player] then return end
+    if not hasDrawing then return end
+    local d = { Name = Drawing.new("Text"), Distance = Drawing.new("Text") }
+    d.Name.Size = 16; d.Name.Center = true; d.Name.Outline = true; d.Name.Color = Color3.fromRGB(170, 0, 255); d.Name.Visible = false
+    d.Distance.Size = 14; d.Distance.Center = true; d.Distance.Outline = true; d.Distance.Color = Color3.fromRGB(170, 0, 255); d.Distance.Visible = false
+    espObjects[player] = d
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    local d = espObjects[player]
+    if d then
+        for _, o in pairs(d) do
+            if o and o.Remove then o:Remove() end
+        end
+        espObjects[player] = nil
+    end
+    ignoredPlayers[player] = nil
+end)
+
+local fovCircle = nil
+if hasDrawing then
+    fovCircle = Drawing.new("Circle")
+    fovCircle.Radius = fovSize
+    fovCircle.Color = Color3.fromRGB(170, 0, 255)
+    fovCircle.Thickness = 2
+    fovCircle.Filled = false
+    fovCircle.Visible = false
+end
+
+RunService.RenderStepped:Connect(function()
+    if fovCircle then
+        if aimbotEnabled then
+            fovCircle.Visible = true
+            fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            fovCircle.Radius = fovSize
+        else
+            fovCircle.Visible = false
+        end
+    end
+
+    local localRoot = GetLocalRoot()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            if not espObjects[player] then CreateESPForPlayer(player) end
+            local d = espObjects[player]
+            if d then
+                local char = player.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local skip = teamCheckEnabled and IsSameTeam(player)
+                if not char or (hum and hum.Health <= 0) or skip then
+                    d.Name.Visible = false
+                    d.Distance.Visible = false
+                    if char then
+                        local hl = char:FindFirstChild("ESP_Highlight")
+                        if hl then hl:Destroy() end
+                    end
+                else
+                    if espEnabled.WallChams then
+                        if not char:FindFirstChild("ESP_Highlight") then CreateHighlightForPlayer(player) end
+                    else
+                        local hl = char:FindFirstChild("ESP_Highlight")
+                        if hl then hl:Destroy() end
+                    end
+                    local root = char:FindFirstChild("HumanoidRootPart")
+                    local head = char:FindFirstChild("Head")
+                    if root and head then
+                        local hs, onScreen = WorldToScreen(head.Position)
+                        local rs = WorldToScreen(root.Position)
+                        local dist = localRoot and GetDistance(localRoot.Position, root.Position) or GetDistance(Camera.CFrame.Position, root.Position)
+                        if espEnabled.Name and onScreen then
+                            d.Name.Text = player.Name
+                            d.Name.Position = Vector2.new(hs.X, hs.Y - 40)
+                            d.Name.Visible = true
+                        else
+                            d.Name.Visible = false
+                        end
+                        if espEnabled.Distance and onScreen then
+                            d.Distance.Text = string.format("%.1f m", dist)
+                            d.Distance.Position = Vector2.new(rs.X, rs.Y + 20)
+                            d.Distance.Visible = true
+                        else
+                            d.Distance.Visible = false
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+--// ========== GUI ==========
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ESP_Menu"
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- BotÃ£o D
+local btnOpen = Instance.new("TextButton")
+btnOpen.Size = UDim2.new(0, 50, 0, 50)
+btnOpen.Position = UDim2.new(0.05, 0, 0.15, 0)
+btnOpen.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+btnOpen.Text = "D"
+btnOpen.TextColor3 = Color3.fromRGB(170, 0, 255)
+btnOpen.Font = Enum.Font.GothamBold
+btnOpen.TextSize = 28
+btnOpen.ZIndex = 5
+btnOpen.Parent = ScreenGui
+local cD = Instance.new("UICorner"); cD.CornerRadius = UDim.new(1, 0); cD.Parent = btnOpen
+
+-- Frame Principal
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 280, 0, 430)
+MainFrame.Position = UDim2.new(0.5, -140, 0.2, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 2
+MainFrame.BorderColor3 = Color3.fromRGB(170, 0, 255)
+MainFrame.Visible = false
+MainFrame.ZIndex = 3
+MainFrame.Parent = ScreenGui
+local cM = Instance.new("UICorner"); cM.CornerRadius = UDim.new(0, 8); cM.Parent = MainFrame
+
+local uiScale = Instance.new("UIScale")
+uiScale.Scale = panelScale / 100
+uiScale.Parent = MainFrame
+
+local ScrollingFrame = Instance.new("ScrollingFrame")
+ScrollingFrame.Size = UDim2.new(1, 0, 1, -55)
+ScrollingFrame.Position = UDim2.new(0, 0, 0, 55)
+ScrollingFrame.BackgroundTransparency = 1
+ScrollingFrame.BorderSizePixel = 0
+ScrollingFrame.ScrollBarThickness = 4
+ScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(170, 0, 255)
+ScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ScrollingFrame.Parent = MainFrame
+
+local L = Instance.new("UIListLayout")
+L.SortOrder = Enum.SortOrder.LayoutOrder
+L.Padding = UDim.new(0, 5)
+L.Parent = ScrollingFrame
+
+local P = Instance.new("UIPadding")
+P.PaddingTop = UDim.new(0, 10)
+P.PaddingLeft = UDim.new(0, 10)
+P.PaddingRight = UDim.new(0, 10)
+P.Parent = ScrollingFrame
+
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 55)
+Header.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+
+local T1 = Instance.new("TextLabel")
+T1.Size = UDim2.new(1, 0, 0, 25); T1.Position = UDim2.new(0, 0, 0, 2)
+T1.BackgroundTransparency = 1; T1.Text = "DROJ STORE"
+T1.TextColor3 = Color3.fromRGB(170, 0, 255); T1.Font = Enum.Font.GothamBold
+T1.TextSize = 18; T1.Parent = Header
+
+local T2 = Instance.new("TextLabel")
+T2.Size = UDim2.new(1, 0, 0, 20); T2.Position = UDim2.new(0, 0, 0, 28)
+T2.BackgroundTransparency = 1; T2.Text = "ESP Menu"
+T2.TextColor3 = Color3.new(1, 1, 1); T2.Font = Enum.Font.Gotham
+T2.TextSize = 14; T2.Parent = Header
+
+-- Drag do botÃ£o D (por clique)
+local bDrag, bMoved, bStart, bStartPos = false, false, nil, nil
+btnOpen.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        bDrag = true; bMoved = false
+        bStart = input.Position; bStartPos = btnOpen.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if bDrag and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - bStart
+        if math.abs(delta.X) > 5 or math.abs(delta.Y) > 5 then bMoved = true end
+        btnOpen.Position = UDim2.new(bStartPos.X.Scale, bStartPos.X.Offset + delta.X, bStartPos.Y.Scale, bStartPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        bDrag = false
+    end
+end)
+btnOpen.MouseButton1Click:Connect(function()
+    if not bMoved then MainFrame.Visible = not MainFrame.Visible end
+end)
+
+-- Drag do menu
+local mDrag, mStart, mStartPos = false, nil, nil
+Header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        mDrag = true; mStart = input.Position; mStartPos = MainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if mDrag and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - mStart
+        MainFrame.Position = UDim2.new(mStartPos.X.Scale, mStartPos.X.Offset + delta.X, mStartPos.Y.Scale, mStartPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        mDrag = false
+    end
+end)
+
+-- Toggle
+local function CreateToggle(name, labelText, callback)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, 0, 0, 30)
+    f.BackgroundTransparency = 1
+    f.Parent = ScrollingFrame
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(0, 160, 1, 0); lbl.Position = UDim2.new(0, 0, 0, 0)
+    lbl.BackgroundTransparency = 1; lbl.Text = labelText
+    lbl.TextColor3 = Color3.new(1,1,1); lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Font = Enum.Font.Gotham; lbl.TextSize = 14; lbl.Parent = f
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 60, 0, 20); btn.Position = UDim2.new(1, -60, 0.5, -10)
+    btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    btn.Text = "OFF"; btn.TextColor3 = Color3.new(1,0,0)
+    btn.Font = Enum.Font.GothamBold; btn.TextSize = 12; btn.Parent = f
+
+    local state = false
+    local function upd()
+        if state then
+            btn.Text = "ON"; btn.TextColor3 = Color3.new(0,1,0)
+            btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        else
+            btn.Text = "OFF"; btn.TextColor3 = Color3.new(1,0,0)
+            btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        end
+        if callback then callback(state)
+        elseif name == "Aimbot" then aimbotEnabled = state
+        else espEnabled[name] = state end
+    end
+    upd()
+    btn.MouseButton1Click:Connect(function() state = not state; upd() end)
+end
+
+-- NumÃ©rico
+local function CreateNumericControl(titleText, minVal, maxVal, step, initialVal)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, 0, 0, 35)
+    f.BackgroundTransparency = 1
+    f.Parent = ScrollingFrame
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(0, 150, 0, 20); lbl.Position = UDim2.new(0, 0, 0, 0)
+    lbl.BackgroundTransparency = 1; lbl.Text = titleText
+    lbl.TextColor3 = Color3.new(1,1,1); lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Font = Enum.Font.Gotham; lbl.TextSize = 14; lbl.Parent = f
+
+    local num = Instance.new("TextLabel")
+    num.Size = UDim2.new(0, 40, 0, 20); num.Position = UDim2.new(1, -90, 0, 0)
+    num.BackgroundTransparency = 1; num.Text = tostring(initialVal)
+    num.TextColor3 = Color3.fromRGB(170, 0, 255); num.TextXAlignment = Enum.TextXAlignment.Right
+    num.Font = Enum.Font.GothamBold; num.TextSize = 16; num.Parent = f
+
+    local bMinus = Instance.new("TextButton")
+    bMinus.Size = UDim2.new(0, 25, 0, 25); bMinus.Position = UDim2.new(1, -50, 0, 5)
+    bMinus.BackgroundColor3 = Color3.fromRGB(40, 40, 40); bMinus.Text = "-"
+    bMinus.TextColor3 = Color3.new(1,1,1); bMinus.Font = Enum.Font.GothamBold
+    bMinus.TextSize = 16; bMinus.Parent = f
+
+    local bPlus = Instance.new("TextButton")
+    bPlus.Size = UDim2.new(0, 25, 0, 25); bPlus.Position = UDim2.new(1, -25, 0, 5)
+    bPlus.BackgroundColor3 = Color3.fromRGB(40, 40, 40); bPlus.Text = "+"
+    bPlus.TextColor3 = Color3.new(1,1,1); bPlus.Font = Enum.Font.GothamBold
+    bPlus.TextSize = 16; bPlus.Parent = f
+
+    if titleText == "NÃ­vel Aimbot" then
+        bPlus.MouseButton1Click:Connect(function() if aimbotLevel + step <= maxVal then aimbotLevel = aimbotLevel + step; num.Text = tostring(aimbotLevel) end end)
+        bMinus.MouseButton1Click:Connect(function() if aimbotLevel - step >= minVal then aimbotLevel = aimbotLevel - step; num.Text = tostring(aimbotLevel) end end)
+    elseif titleText == "Tamanho FOV" then
+        bPlus.MouseButton1Click:Connect(function() if fovSize + step <= maxVal then fovSize = fovSize + step; num.Text = tostring(fovSize) end end)
+        bMinus.MouseButton1Click:Connect(function() if fovSize - step >= minVal then fovSize = fovSize - step; num.Text = tostring(fovSize) end end)
+    end
+end
+
+-- Mira no corpo
+local function CreateBodyPartSelection()
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, 0, 0, 35)
+    f.BackgroundTransparency = 1
+    f.Parent = ScrollingFrame
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(0, 150, 0, 20); lbl.Position = UDim2.new(0, 0, 0, 0)
+    lbl.BackgroundTransparency = 1; lbl.Text = "Mira no Corpo:"
+    lbl.TextColor3 = Color3.new(1,1,1); lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Font = Enum.Font.Gotham; lbl.TextSize = 14; lbl.Parent = f
+
+    local dd = Instance.new("TextButton")
+    dd.Size = UDim2.new(0, 90, 0, 25); dd.Position = UDim2.new(1, -95, 0, 5)
+    dd.BackgroundColor3 = Color3.fromRGB(40, 40, 40); dd.Text = aimTarget
+    dd.TextColor3 = Color3.fromRGB(170, 0, 255); dd.Font = Enum.Font.GothamBold
+    dd.TextSize = 12; dd.Parent = f
+
+    local opts = {"CabeÃ§a", "Peito"}; local idx = 1
+    dd.MouseButton1Click:Connect(function()
+        idx = idx + 1
+        if idx > #opts then idx = 1 end
+        aimTarget = opts[idx]; dd.Text = aimTarget
+    end)
+end
+
+-- ResoluÃ§Ã£o 1-200
+local function CreateResolutionControl()
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, 0, 0, 35)
+    f.BackgroundTransparency = 1
+    f.Parent = ScrollingFrame
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(0, 150, 0, 20); lbl.Position = UDim2.new(0, 0, 0, 0)
+    lbl.BackgroundTransparency = 1; lbl.Text = "ResoluÃ§Ã£o (%)"
+    lbl.TextColor3 = Color3.new(1,1,1); lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Font = Enum.Font.Gotham; lbl.TextSize = 13; lbl.Parent = f
+
+    local num = Instance.new("TextLabel")
+    num.Size = UDim2.new(0, 40, 0, 20); num.Position = UDim2.new(1, -90, 0, 0)
+    num.BackgroundTransparency = 1; num.Text = tostring(panelScale)
+    num.TextColor3 = Color3.fromRGB(170, 0, 255); num.TextXAlignment = Enum.TextXAlignment.Right
+    num.Font = Enum.Font.GothamBold; num.TextSize = 16; num.Parent = f
+
+    local bMinus = Instance.new("TextButton")
+    bMinus.Size = UDim2.new(0, 25, 0, 25); bMinus.Position = UDim2.new(1, -50, 0, 5)
+    bMinus.BackgroundColor3 = Color3.fromRGB(40, 40, 40); bMinus.Text = "-"
+    bMinus.TextColor3 = Color3.new(1,1,1); bMinus.Font = Enum.Font.GothamBold
+    bMinus.TextSize = 16; bMinus.Parent = f
+
+    local bPlus = Instance.new("TextButton")
+    bPlus.Size = UDim2.new(0, 25, 0, 25); bPlus.Position = UDim2.new(1, -25, 0, 5)
+    bPlus.BackgroundColor3 = Color3.fromRGB(40, 40, 40); bPlus.Text = "+"
+    bPlus.TextColor3 = Color3.new(1,1,1); bPlus.Font = Enum.Font.GothamBold
+    bPlus.TextSize = 16; bPlus.Parent = f
+
+    bPlus.MouseButton1Click:Connect(function()
+        if panelScale + 5 <= 200 then
+            panelScale = panelScale + 5
+            uiScale.Scale = panelScale / 100
+            num.Text = tostring(panelScale)
+        end
+    end)
+    bMinus.MouseButton1Click:Connect(function()
+        if panelScale - 5 >= 1 then
+            panelScale = panelScale - 5
+            uiScale.Scale = panelScale / 100
+            num.Text = tostring(panelScale)
+        end
+    end)
+end
+
+-- Lista de players com pesquisa
+local function CreatePlayerIgnoreList()
+    local sec = Instance.new("Frame")
+    sec.Size = UDim2.new(1, 0, 0, 25)
+    sec.BackgroundTransparency = 1
+    sec.Parent = ScrollingFrame
+
+    local ttl = Instance.new("TextLabel")
+    ttl.Size = UDim2.new(1, 0, 1, 0); ttl.BackgroundTransparency = 1
+    ttl.Text = "=== IGNORAR NO AIMBOT ==="
+    ttl.TextColor3 = Color3.fromRGB(170, 0, 255)
+    ttl.Font = Enum.Font.GothamBold; ttl.TextSize = 13; ttl.Parent = sec
+
+    local sf = Instance.new("Frame")
+    sf.Size = UDim2.new(1, 0, 0, 28)
+    sf.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    sf.BorderSizePixel = 0
+    sf.Parent = ScrollingFrame
+    local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(0, 4); sc.Parent = sf
+
+    local ico = Instance.new("TextLabel")
+    ico.Size = UDim2.new(0, 25, 1, 0); ico.Position = UDim2.new(0, 0, 0, 0)
+    ico.BackgroundTransparency = 1; ico.Text = "ðŸ”"
+    ico.TextColor3 = Color3.fromRGB(170, 0, 255); ico.Font = Enum.Font.GothamBold
+    ico.TextSize = 14; ico.Parent = sf
+
+    local sb = Instance.new("TextBox")
+    sb.Size = UDim2.new(1, -30, 1, 0); sb.Position = UDim2.new(0, 25, 0, 0)
+    sb.BackgroundTransparency = 1; sb.Text = ""
+    sb.PlaceholderText = "Pesquisar player..."
+    sb.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
+    sb.TextColor3 = Color3.new(1,1,1); sb.Font = Enum.Font.Gotham
+    sb.TextSize = 13; sb.TextXAlignment = Enum.TextXAlignment.Left
+    sb.ClearTextOnFocus = false; sb.Parent = sf
+
+    local cont = Instance.new("Frame")
+    cont.Size = UDim2.new(1, 0, 0, 0)
+    cont.AutomaticSize = Enum.AutomaticSize.Y
+    cont.BackgroundTransparency = 1
+    cont.Parent = ScrollingFrame
+    local cl = Instance.new("UIListLayout")
+    cl.SortOrder = Enum.SortOrder.LayoutOrder
+    cl.Padding = UDim.new(0, 3)
+    cl.Parent = cont
+
+    local rows = {}
+
+    local function filter()
+        local q = string.lower(sb.Text)
+        for player, row in pairs(rows) do
+            if player.Parent then
+                row.Visible = (q == "") or string.find(string.lower(player.Name), q, 1, true)
+            end
+        end
+    end
+
+    local function refresh()
+        for player, row in pairs(rows) do
+            if not player.Parent then row:Destroy(); rows[player] = nil end
+        end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and not rows[player] then
+                local row = Instance.new("Frame")
+                row.Size = UDim2.new(1, 0, 0, 22)
+                row.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+                row.BorderSizePixel = 0
+                row.Parent = cont
+                local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 4); rc.Parent = row
+
+                local nm = Instance.new("TextLabel")
+                nm.Size = UDim2.new(1, -30, 1, 0); nm.Position = UDim2.new(0, 5, 0, 0)
+                nm.BackgroundTransparency = 1; nm.Text = player.Name
+                nm.TextColor3 = Color3.new(1,1,1); nm.TextXAlignment = Enum.TextXAlignment.Left
+                nm.Font = Enum.Font.Gotham; nm.TextSize = 12
+                nm.TextTruncate = Enum.TextTruncate.AtEnd; nm.Parent = row
+
+                local chk = Instance.new("TextButton")
+                chk.Size = UDim2.new(0, 20, 0, 20); chk.Position = UDim2.new(1, -23, 0.5, -10)
+                chk.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+                chk.Text = ""; chk.TextColor3 = Color3.new(1,1,1)
+                chk.Font = Enum.Font.GothamBold; chk.TextSize = 12; chk.Parent = row
+                local cc = Instance.new("UICorner"); cc.CornerRadius = UDim.new(0, 4); cc.Parent = chk
+
+                local state = ignoredPlayers[player] == true
+                local function upd()
+                    if state then
+                        chk.Text = "X"
+                        chk.BackgroundColor3 = Color3.fromRGB(170, 0, 255)
+                        chk.TextColor3 = Color3.new(1,1,1)
+                    else
+                        chk.Text = ""
+                        chk.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+                    end
+                end
+                upd()
+                chk.MouseButton1Click:Connect(function()
+                    state = not state
+                    ignoredPlayers[player] = state or nil
+                    upd()
+                end)
+
+                rows[player] = row
+            end
+        end
+        filter()
+    end
+
+    sb:GetPropertyChangedSignal("Text"):Connect(filter)
+    refresh()
+    Players.PlayerAdded:Connect(function() task.wait(0.5) refresh() end)
+    Players.PlayerRemoving:Connect(function() task.wait(0.2) refresh() end)
+end
+
+-- ====== MONTAGEM ======
+CreateToggle("WallChams", "Fantasma (Borda)")
+CreateToggle("Name", "Nome")
+CreateToggle("Distance", "DistÃ¢ncia")
+CreateToggle("TeamCheck", "Team Check (Ignorar Aliados)", function(s) teamCheckEnabled = s end)
+
+local sep1 = Instance.new("TextLabel")
+sep1.Size = UDim2.new(1, 0, 0, 20); sep1.BackgroundTransparency = 1
+sep1.Text = "=== AIMBOT ==="; sep1.TextColor3 = Color3.fromRGB(170, 0, 255)
+sep1.Font = Enum.Font.GothamBold; sep1.TextSize = 14; sep1.Parent = ScrollingFrame
+
+CreateToggle("Aimbot", "Ativar Aimbot")
+CreateNumericControl("NÃ­vel Aimbot", 1, 10, 1, aimbotLevel)
+CreateNumericControl("Tamanho FOV", 10, 500, 5, fovSize)
+CreateBodyPartSelection()
+CreatePlayerIgnoreList()
+
+local sep2 = Instance.new("TextLabel")
+sep2.Size = UDim2.new(1, 0, 0, 20); sep2.BackgroundTransparency = 1
+sep2.Text = "=== PAINEL ==="; sep2.TextColor3 = Color3.fromRGB(170, 0, 255)
+sep2.Font = Enum.Font.GothamBold; sep2.TextSize = 14; sep2.Parent = ScrollingFrame
+
+CreateResolutionControl()
+
+-- RodapÃ©
+local footer = Instance.new("Frame")
+footer.Size = UDim2.new(1, -10, 0, 80)
+footer.BackgroundTransparency = 1
+footer.Parent = ScrollingFrame
+
+local dSym = Instance.new("TextLabel")
+dSym.Size = UDim2.new(0, 25, 0, 25); dSym.Position = UDim2.new(0, 0, 0, 0)
+dSym.BackgroundTransparency = 1; dSym.Text = "D"
+dSym.TextColor3 = Color3.fromRGB(255, 255, 255); dSym.Font = Enum.Font.GothamBold
+dSym.TextSize = 20; dSym.Parent = footer
+
+local dBtn = Instance.new("TextButton")
+dBtn.Size = UDim2.new(1, -35, 0, 25); dBtn.Position = UDim2.new(0, 30, 0, 0)
+dBtn.BackgroundTransparency = 1
+dBtn.Text = "https://discord.gg/qvBQGzYVu"
+dBtn.TextColor3 = Color3.fromRGB(170, 0, 255)
+dBtn.TextXAlignment = Enum.TextXAlignment.Left
+dBtn.Font = Enum.Font.GothamBold; dBtn.TextSize = 12; dBtn.Parent = footer
+dBtn.MouseButton1Click:Connect(function()
+    if setclipboard then setclipboard("https://discord.gg/qvBQGzYVu") end
+end)
+
+local nick = Instance.new("TextLabel")
+nick.Size = UDim2.new(1, 0, 0, 20); nick.Position = UDim2.new(0, 0, 0, 35)
+nick.BackgroundTransparency = 1; nick.Text = "DROJ STORE"
+nick.TextColor3 = Color3.fromRGB(170, 0, 255)
+nick.TextXAlignment = Enum.TextXAlignment.Left
+nick.Font = Enum.Font.GothamBold; nick.TextSize = 16; nick.Parent = footer
+
+print("Droj Store ESP + Aimbot Carregado!")
