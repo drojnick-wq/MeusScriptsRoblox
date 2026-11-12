@@ -16,7 +16,7 @@ const db = new DatabaseSync(
   path.join(process.env.DATA_DIR || "data", "app.sqlite"),
 );
 db.exec(
-  `PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT UNIQUE,name TEXT,password TEXT); CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,owner TEXT NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL,created TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_owner_kind ON records(owner,kind); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,data TEXT,expires INTEGER);`,
+  `PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT UNIQUE,name TEXT,password TEXT); CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,owner TEXT NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL,created TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_owner_kind ON records(owner,kind); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,data TEXT,expires INTEGER); CREATE TABLE IF NOT EXISTS integration_secrets(owner TEXT NOT NULL,provider TEXT NOT NULL,encrypted TEXT NOT NULL,PRIMARY KEY(owner,provider));`,
 );
 class Store extends session.Store {
   get(id, cb) {
@@ -51,6 +51,76 @@ if (!fs.existsSync(secretPath))
   fs.writeFileSync(secretPath, crypto.randomBytes(48).toString("hex"), {
     mode: 0o600,
   });
+// The encryption key is separate from the database; back up both securely.
+const integrationKeyPath = path.join(
+  process.env.DATA_DIR || "data",
+  "integration-key",
+);
+if (!fs.existsSync(integrationKeyPath)) {
+  try {
+    fs.writeFileSync(integrationKeyPath, crypto.randomBytes(32), {
+      mode: 0o600,
+      flag: "wx",
+    });
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+  }
+}
+if (fs.statSync(integrationKeyPath).mode & 0o077)
+  throw new Error(
+    "Integration key file must not be accessible by group or others; set permissions to 0600",
+  );
+const integrationKey = fs.readFileSync(integrationKeyPath);
+if (integrationKey.length !== 32)
+  throw new Error("Invalid integration encryption key");
+function encryptSecret(value, owner) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", integrationKey, iv);
+  cipher.setAAD(Buffer.from(`google-places:${owner}`));
+  const encrypted = Buffer.concat([
+    cipher.update(value, "utf8"),
+    cipher.final(),
+  ]);
+  return JSON.stringify({
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+    value: encrypted.toString("base64"),
+  });
+}
+function googleKey(owner) {
+  const row = db
+    .prepare(
+      "SELECT encrypted FROM integration_secrets WHERE owner=? AND provider=?",
+    )
+    .get(owner, "google-places");
+  if (!row) return process.env.GOOGLE_PLACES_API_KEY || "";
+  try {
+    const payload = JSON.parse(row.encrypted);
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      integrationKey,
+      Buffer.from(payload.iv, "base64"),
+    );
+    decipher.setAAD(Buffer.from(`google-places:${owner}`));
+    decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(payload.value, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    throw Object.assign(
+      new Error(
+        "Não foi possível ler a chave desta conta. Reconfigure a integração.",
+      ),
+      { status: 503 },
+    );
+  }
+}
+function hasPersonalGoogleKey(owner) {
+  return !!db
+    .prepare("SELECT 1 FROM integration_secrets WHERE owner=? AND provider=?")
+    .get(owner, "google-places");
+}
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "200kb" }));
@@ -170,14 +240,52 @@ app.get("/api/state", (q, s) => {
     ),
   );
 });
-app.get("/api/integrations", (q, s) =>
-  s.json({
-    places: !!process.env.GOOGLE_PLACES_API_KEY,
+app.get("/api/integrations", (q, s) => {
+  const personal = hasPersonalGoogleKey(q.session.user.id);
+  s.set("Cache-Control", "no-store").json({
+    places: personal || !!process.env.GOOGLE_PLACES_API_KEY,
+    placesSource: personal
+      ? "account"
+      : process.env.GOOGLE_PLACES_API_KEY
+        ? "server"
+        : null,
     ai: !!process.env.OPENAI_API_KEY,
     payments: false,
     publicBase: process.env.PUBLIC_BASE_URL || null,
-  }),
-);
+  });
+});
+const integrationLimiter = rateLimit({ windowMs: 60000, limit: 10 });
+app.put("/api/integrations/google-places", integrationLimiter, (q, s) => {
+  const { key } = z
+    .object({
+      key: z
+        .string()
+        .trim()
+        .min(1)
+        .max(512)
+        .regex(/^[\x21-\x7e]+$/),
+    })
+    .parse(q.body);
+  db.prepare(
+    "INSERT INTO integration_secrets(owner,provider,encrypted) VALUES(?,?,?) ON CONFLICT(owner,provider) DO UPDATE SET encrypted=excluded.encrypted",
+  ).run(
+    q.session.user.id,
+    "google-places",
+    encryptSecret(key, q.session.user.id),
+  );
+  audit(q.session.user.id, "Chave do Google Places configurada para a conta.");
+  s.set("Cache-Control", "no-store").json({ ok: true });
+});
+app.delete("/api/integrations/google-places", integrationLimiter, (q, s) => {
+  db.prepare(
+    "DELETE FROM integration_secrets WHERE owner=? AND provider=?",
+  ).run(q.session.user.id, "google-places");
+  audit(q.session.user.id, "Chave do Google Places removida da conta.");
+  s.set("Cache-Control", "no-store").json({
+    ok: true,
+    serverKeyAvailable: !!process.env.GOOGLE_PLACES_API_KEY,
+  });
+});
 app.post("/api/search", async (q, s) => {
   try {
     const b = z
@@ -204,10 +312,11 @@ app.post("/api/search", async (q, s) => {
           },
         ],
       });
-    if (!process.env.GOOGLE_PLACES_API_KEY)
+    const placesKey = googleKey(q.session.user.id);
+    if (!placesKey)
       return s.status(503).json({
         error:
-          "Google Places não configurado. Defina GOOGLE_PLACES_API_KEY no servidor ou use o modo demonstração.",
+          "Google Places não configurado. Configure a chave em Configurações ou use o modo demonstração.",
       });
     const r = await fetch(
       "https://places.googleapis.com/v1/places:searchText",
@@ -215,7 +324,7 @@ app.post("/api/search", async (q, s) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Goog-Api-Key": process.env.GOOGLE_PLACES_API_KEY,
+          "X-Goog-Api-Key": placesKey,
           "X-Goog-FieldMask":
             "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.rating,places.userRatingCount,nextPageToken",
         },
@@ -250,7 +359,14 @@ app.post("/api/search", async (q, s) => {
       nextPageToken: d.nextPageToken,
     });
   } catch (e) {
-    s.status(400).json({ error: e.message });
+    s.status(e.status || (e instanceof z.ZodError ? 400 : 502)).json({
+      error:
+        e instanceof z.ZodError
+          ? "Dados inválidos. Revise a busca."
+          : e.status
+            ? e.message
+            : "Não foi possível consultar o Google Places. Verifique a chave, permissões, faturamento e conexão.",
+    });
   }
 });
 const leadSchema = z.object({

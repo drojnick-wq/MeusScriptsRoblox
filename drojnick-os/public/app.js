@@ -314,7 +314,7 @@ function radar() {
       "Encontre empresas reais. Identifique oportunidades verificáveis.",
       '<button onclick="manualLead()">＋ Cadastro manual</button>',
     ) +
-    `<div class="notice">${integrations.places ? "Google Places conectado. Os resultados incluem fonte e data da consulta." : "Google Places ainda não configurado. Explore o fluxo com um estabelecimento claramente demonstrativo."}</div><section class="panel"><form id="searchform" class="toolbar"><div><label>Categoria</label><select name="category"><option>Restaurante</option><option>Barbearia</option><option>Clínica</option><option>Pet shop</option><option>Academia</option><option>Oficina mecânica</option><option>Hotel</option><option>Loja de roupas</option></select></div><div><label>Cidade e região</label><input name="city" placeholder="Ex.: Rio de Janeiro, Copacabana" required value="Rio de Janeiro"></div><div><label>Fonte de pesquisa</label><select name="mode"><option value="real">Google Places · dados reais</option><option value="demo" ${!integrations.places ? "selected" : ""}>Demonstração identificada</option></select></div><button class="primary">⌕ Buscar negócios</button></form></section><div id="results" style="margin-top:22px">${resultCards()}</div>`
+    `<div class="notice">${integrations.places ? "Chave do Google Places configurada. A disponibilidade será verificada na pesquisa." : 'Google Places não configurado. <button type="button" onclick="configurePlaces()">Configurar chave</button> ou use o modo demonstração.'}</div><section class="panel"><form id="searchform" class="toolbar"><div><label>Categoria</label><select name="category"><option>Restaurante</option><option>Barbearia</option><option>Clínica</option><option>Pet shop</option><option>Academia</option><option>Oficina mecânica</option><option>Hotel</option><option>Loja de roupas</option></select></div><div><label>Cidade e região</label><input name="city" placeholder="Ex.: Rio de Janeiro, Copacabana" required value="Rio de Janeiro"></div><div><label>Fonte de pesquisa</label><select name="mode"><option value="real">Google Places · dados reais</option><option value="demo" ${!integrations.places ? "selected" : ""}>Demonstração identificada</option></select></div><button class="primary">⌕ Buscar negócios</button></form></section><div id="results" style="margin-top:22px">${resultCards()}</div>`
   );
 }
 function resultCards() {
@@ -669,7 +669,11 @@ function settings() {
         "Google Places",
         integrations.places,
         "GOOGLE_PLACES_API_KEY",
-        "Consulta legítima de negócios. Ative Places API (New) e faturamento no Google Cloud.",
+        integrations.placesSource === "account"
+          ? "Chave desta conta configurada. A chave não é exibida novamente; a conexão é verificada ao pesquisar."
+          : integrations.placesSource === "server"
+            ? "Chave fornecida pelo servidor. A conexão é verificada ao pesquisar."
+            : "Ative Places API (New) e faturamento no Google Cloud; depois adicione sua chave aqui.",
       ],
       [
         "Inteligência artificial",
@@ -693,12 +697,47 @@ function settings() {
     ]
       .map(
         ([n, on, v, d]) =>
-          `<article class="project-card"><div class="project-body"><h3>${n}</h3><span class="pill">${on ? "Configurado" : "Configuração pendente / indisponível"}</span><p>${E(d)}</p><small>${E(v)}</small></div></article>`,
+          `<article class="project-card"><div class="project-body"><h3>${n}</h3><span class="pill">${on ? "Configurado" : "Configuração pendente / indisponível"}</span><p>${E(d)}</p><small>${E(v)}</small>${n === "Google Places" ? `<div class="actions" style="margin-top:16px"><button onclick="configurePlaces()">${integrations.places ? "Alterar chave" : "Configurar chave"}</button>${integrations.placesSource === "account" ? '<button onclick="removePlaces()">Remover chave da conta</button>' : ""}</div>` : ""}</div></article>`,
       )
       .join(
         "",
-      )}</div><div class="notice" style="margin-top:20px">Configure variáveis no painel seguro da hospedagem e reinicie o servidor. Não envie credenciais pelo chat. Contas são isoladas; colaboração e acesso limitado de clientes ainda não implementados.</div>`
+      )}</div><div class="notice" style="margin-top:20px">A chave do Google Places pode ser configurada nesta conta. Outras variáveis devem ser configuradas no painel seguro da hospedagem. Não envie credenciais pelo chat. Contas são isoladas; colaboração e acesso limitado de clientes ainda não implementados.</div>`
   );
+}
+function configurePlaces() {
+  if (!need()) return;
+  modal(
+    "Configurar Google Places",
+    `<p>No Google Cloud, ative o faturamento e a Places API (New), crie uma chave e restrinja seu uso a essa API. A chave é armazenada criptografada no servidor desta instalação e não será exibida novamente.</p><p><a href="https://developers.google.com/maps/documentation/places/web-service/cloud-setup?hl=pt-br" target="_blank" rel="noopener">Como configurar no Google Cloud ↗</a></p><p>Use uma conexão HTTPS confiável para enviar a chave. Salvar não valida a chave nem confirma faturamento; a primeira pesquisa verificará a integração.</p><form id="placesform"><label for="placeskey">Chave da API Google Places</label><input id="placeskey" name="key" type="password" autocomplete="off" spellcheck="false" required maxlength="512"><button class="primary">Salvar chave para minha conta</button></form>${integrations.placesSource === "account" ? "<p>Para remover a chave, acesse Configurações.</p>" : ""}`,
+  );
+  $("#placesform").onsubmit = (e) => {
+    e.preventDefault();
+    const key = $("#placeskey").value;
+    run(async () => {
+      await api("/integrations/google-places", "PUT", { key });
+      closeModal();
+      results = [];
+      pageToken = "";
+      await refresh();
+      if (location.hash === "#radar") $("select[name=mode]").value = "real";
+      toast("Chave salva. Faça uma pesquisa para verificar a integração.");
+    });
+  };
+}
+function removePlaces() {
+  modal(
+    "Remover chave do Google Places",
+    `<p>A chave da sua conta será removida desta instalação. Caso exista uma chave configurada no servidor, ela continuará disponível para esta conta.</p><button id="remove-places-confirm">Remover chave</button>`,
+  );
+  $("#remove-places-confirm").onclick = () =>
+    run(async () => {
+      await api("/integrations/google-places", "DELETE");
+      closeModal();
+      results = [];
+      pageToken = "";
+      await refresh();
+      toast("Chave da conta removida.");
+    });
 }
 function automations() {
   return (

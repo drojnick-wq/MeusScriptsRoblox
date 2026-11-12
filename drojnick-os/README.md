@@ -13,7 +13,13 @@ Para variáveis locais: copie .env.example para .env, configure somente no ambie
 ## Fluxo reproduzível
 
 1. Crie conta e abra Radar de negócios.
-2. Com GOOGLE_PLACES_API_KEY configurada, escolha Google Places; sem chave, escolha Demonstração identificada. O modo de teste não consulta empresas reais.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:6b77f8579f9517200578fa0ac8d41d6ad8e1d3dcc8086fe465af7d133a89ee68 -->
+
+2. Configure uma chave do Google Places no Radar de negócios ou em Configurações, ou defina GOOGLE_PLACES_API_KEY no servidor. Sem chave, escolha Demonstração identificada; o modo de teste não consulta empresas reais.
+
+<!-- /coderabbit-ai-generated:v1 -->
 3. Pesquise categoria e cidade, salve o lead e abra Análise de empresas.
 4. Analise o lead; o relatório separa os dados informados, inferências e informações indisponíveis. A pontuação é determinística com pesos visíveis e não mede crédito.
 5. Gere o site. Edite apresentação, telefone, endereço, cor e produtos no formato Nome | preço. Salve a versão e recarregue para verificar persistência.
@@ -30,10 +36,34 @@ Para variáveis locais: copie .env.example para .env, configure somente no ambie
 - SESSION_SECRET: segredo gerado no gerenciador seguro de produção; sem a variável, o aplicativo gera arquivo local com permissão 0600.
 - PUBLIC_BASE_URL: URL HTTPS pública para links da proposta e WhatsApp. Configure o domínio externo correto.
 - NODE_ENV=production: cookies seguros, requer HTTPS e proxy confiável.
-- GOOGLE_PLACES_API_KEY: habilite Places API (New), permissões e faturamento. O conector usa searchText com máscara de campos e paginação. A disponibilidade e o uso dos dados seguem os termos do fornecedor.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:25a55bffa2ea84b9ade6757b26b9fe3eda795feb980895ab8d7b36cbee0ee40a -->
+
+- Google Places: ative Places API (New), permissões e faturamento no Google Cloud. Na aplicação, entre em Radar de negócios ou Configurações e selecione Configurar chave. Uma chave por conta é criptografada e armazenada no servidor; configurar não confirma que a chave funciona, verifique com uma pesquisa. A variável GOOGLE_PLACES_API_KEY continua disponível como configuração compartilhada e é usada quando a conta não possui uma chave própria. Restringir a chave no Google Cloud e manter o aplicativo em HTTPS. O conector usa searchText com máscara de campos e paginação. A disponibilidade e o uso dos dados seguem os termos do fornecedor.
+
+<!-- /coderabbit-ai-generated:v1 -->
 - OPENAI_API_KEY e OPENAI_MODEL: assistente externo opcional. Chaves só são lidas no servidor. A geração dos sites desta entrega é por templates; ela não finge usar IA.
 
-Hospede em servidor Node 24 com volume persistente, HTTPS e um proxy confiável. Execute uma instância por banco SQLite; arquitetura horizontal e PostgreSQL exigem adaptação. Faça backup consistente usando a API de backup do SQLite ou parando o serviço antes de copiar data/. Não copie somente o arquivo principal enquanto WAL estiver ativo. Mantenha os backups protegidos. Domínio e SSL são configurados na hospedagem, não automaticamente pela aplicação. O Preview do ambiente não representa uma implantação definitiva com SLA.
+Hospede em servidor Node 24 com volume persistente, HTTPS e um proxy confiável. Execute uma instância por banco SQLite; arquitetura horizontal e PostgreSQL exigem adaptação. <!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:614844ea8782a15b6e8178aafba6576dbfb0d28d449bbda6926300378888451c -->
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:2912ad8f67c912d991940bad8d63f13beac79412c16e13c49a0e0bd72cb41d10 -->
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:da38af15f4357eb8eb9045213b58b31f8cee7ff4f9f815df47516c1eda5a1aeb -->
+
+Faça backup consistente usando a API de backup do SQLite ou parando o serviço antes de copiar o diretório configurado em DATA_DIR (padrão: data/). Preserve e restaure o banco de dados junto com a chave correspondente em DATA_DIR/integration-key (padrão: data/integration-key), em local seguro. A chave é necessária para descriptografar as credenciais armazenadas; sua perda exige configurá-las novamente. Após restaurar a chave, configure permissão 0600; o servidor recusa o arquivo se usuários do grupo ou outros usuários puderem acessá-lo.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+<!-- /coderabbit-ai-generated:v1 --> Não copie somente o arquivo principal enquanto WAL estiver ativo. Mantenha os backups protegidos. Domínio e SSL são configurados na hospedagem, não automaticamente pela aplicação. O Preview do ambiente não representa uma implantação definitiva com SLA.
 
 ## Segurança implementada
 
@@ -43,7 +73,13 @@ Hash bcrypt, sessões persistentes com cookies HttpOnly/SameSite, sessão renova
 
 Implementado: autenticação; radar com categoria/cidade, paginação e deduplicação por fornecedor; cadastro manual; análise determinística; site público e editor de campos estruturados; versões e restauração; cardápio e carrinho básico; propostas públicas e PDF; WhatsApp com revisão; CRM de 11 etapas com arrastar/soltar; notas; tarefas; vendas e financeiro básicos; assistente OpenAI configurável; painel com registros da conta e gráfico por período.
 
-Parcial: três variantes de paleta sobre a mesma estrutura, sem biblioteca completa por segmento; editor sem arrastar blocos, imagens ou autosave; dashboard com indicadores principais; análise sem inspeção do website; clientes derivados de leads fechados; automações síncronas sem fila; formulário de configuração informa variáveis, não armazena chaves pelo navegador.
+Parcial: três variantes de paleta sobre a mesma estrutura, sem biblioteca completa por segmento; editor sem arrastar blocos, imagens ou autosave; dashboard com indicadores principais; análise sem inspeção do website; clientes derivados de leads fechados; automações síncronas sem fila; <!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:cb0e166ae5edf123313097c2c097b767112a871193896f5f71802bcdae5be64e -->
+
+a chave Google Places pode ser configurada por conta; outras integrações usam variáveis do servidor.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 Não implementado: Mercado Pago/Pix/webhooks, checkout, entrega/adicionais de produtos, contratos e assinatura, aceite público de propostas, propostas editáveis/duplicação, exportação de projetos/CSV, expiração/senha de demonstrações, exclusão pela interface, geração em lote, filas/retries, controle de custos, domínios/SSL automáticos, papéis de colaboradores/clientes, organizações compartilhadas, catálogo de dezesseis templates, recorrência/despesas, CNPJ, pesos configuráveis, provedores Anthropic/Google AI, SEO avançado, uploads, restauração de backup pelo painel.
 

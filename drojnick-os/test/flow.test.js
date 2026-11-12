@@ -20,23 +20,28 @@ async function req(route, method = "GET", body, c = cookie) {
   });
   return { status: r.status, headers: r.headers, body: await r.text() };
 }
-before(async () => {
-  child = spawn(process.execPath, ["server.js"], {
-    env: {
-      ...process.env,
-      PORT: "3199",
-      DATA_DIR: dir,
-      GOOGLE_PLACES_API_KEY: "",
-      OPENAI_API_KEY: "",
+async function startServer() {
+  child = spawn(
+    process.execPath,
+    ["--require", path.join(__dirname, "google-stub.cjs"), "server.js"],
+    {
+      env: {
+        ...process.env,
+        PORT: "3199",
+        DATA_DIR: dir,
+        GOOGLE_PLACES_API_KEY: "",
+        OPENAI_API_KEY: "",
+      },
+      stdio: "pipe",
     },
-    stdio: "pipe",
-  });
+  );
   await new Promise((resolve, reject) => {
     child.stdout.once("data", resolve);
     child.once("error", reject);
     setTimeout(() => reject(Error("startup timeout")), 5000).unref();
   });
-});
+}
+before(startServer);
 after(() => {
   child.kill();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -235,6 +240,141 @@ test("complete persistent flow and account isolation", async (t) => {
           )
         ).status,
         404,
+      );
+    },
+  );
+  await t.test(
+    "Google Places credentials are encrypted, isolated, used and removable",
+    async () => {
+      const key = "synthetic-account-key";
+      const put = await req("/api/integrations/google-places", "PUT", { key });
+      assert.equal(put.status, 200);
+      assert.equal(put.headers.get("cache-control"), "no-store");
+      assert.ok(!put.body.includes(key));
+      const status = await req("/api/integrations");
+      assert.deepEqual(JSON.parse(status.body).placesSource, "account");
+      assert.ok(!status.body.includes(key));
+      assert.equal(
+        JSON.parse((await req("/api/integrations", "GET", null, cookie2)).body)
+          .places,
+        false,
+      );
+      assert.equal(
+        (
+          await req(
+            "/api/search",
+            "POST",
+            { category: "Restaurante", city: "Rio" },
+            cookie2,
+          )
+        ).status,
+        503,
+      );
+      const stopped = new Promise((resolve) => child.once("exit", resolve));
+      child.kill();
+      await stopped;
+      await startServer();
+      assert.equal(
+        JSON.parse((await req("/api/integrations")).body).placesSource,
+        "account",
+      );
+      const r = await req("/api/search", "POST", {
+        category: "Restaurante",
+        city: "Rio",
+      });
+      assert.equal(r.status, 200);
+      assert.equal(
+        JSON.parse(r.body).businesses[0].providerId,
+        "test-only-place",
+      );
+      assert.equal(JSON.parse(r.body).nextPageToken, "test-next-page");
+      const { DatabaseSync } = require("node:sqlite");
+      const db = new DatabaseSync(path.join(dir, "app.sqlite"));
+      const stored = db
+        .prepare("SELECT encrypted FROM integration_secrets")
+        .get();
+      assert.ok(stored && !stored.encrypted.includes(key));
+      db.close();
+      assert.equal(
+        fs.statSync(path.join(dir, "integration-key")).mode & 0o777,
+        0o600,
+      );
+      const stoppedForPermissions = new Promise((resolve) =>
+        child.once("exit", resolve),
+      );
+      child.kill();
+      await stoppedForPermissions;
+      const keyPath = path.join(dir, "integration-key");
+      fs.chmodSync(keyPath, 0o644);
+      const insecure = spawn(process.execPath, ["server.js"], {
+        env: { ...process.env, PORT: "3199", DATA_DIR: dir },
+        stdio: "pipe",
+      });
+      let errorOutput = "";
+      insecure.stderr.on("data", (data) => {
+        errorOutput += data;
+      });
+      const exitCode = await new Promise((resolve) =>
+        insecure.once("exit", resolve),
+      );
+      assert.notEqual(exitCode, 0);
+      assert.match(errorOutput, /Integration key file must not be accessible/);
+      fs.chmodSync(keyPath, 0o600);
+      await startServer();
+      assert.equal(
+        JSON.parse((await req("/api/integrations")).body).placesSource,
+        "account",
+      );
+      assert.equal(
+        (
+          await req("/api/integrations/google-places", "PUT", {
+            key: "invalid key with spaces",
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (await req("/api/integrations/google-places", "DELETE", null, cookie2))
+          .status,
+        200,
+      );
+      assert.equal(
+        JSON.parse((await req("/api/integrations")).body).places,
+        true,
+      );
+      assert.equal(
+        (
+          await req("/api/integrations/google-places", "PUT", {
+            key: "rejected-key",
+          })
+        ).status,
+        200,
+      );
+      assert.equal(
+        (
+          await req("/api/search", "POST", {
+            category: "Restaurante",
+            city: "Rio",
+          })
+        ).status,
+        502,
+      );
+      assert.equal(
+        (await req("/api/integrations/google-places", "DELETE")).status,
+        200,
+      );
+      assert.equal(
+        JSON.parse((await req("/api/integrations")).body).places,
+        false,
+      );
+      assert.equal(
+        (
+          await req("/api/search", "POST", {
+            category: "Restaurante",
+            city: "Rio",
+          })
+        ).status,
+        503,
       );
     },
   );
