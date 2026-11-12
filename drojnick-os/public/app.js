@@ -399,16 +399,14 @@ async function doSearch(args) {
     pageToken = d.nextPageToken || "";
     if ($("#results")) $("#results").innerHTML = resultCards();
   } catch (e) {
-    if (request === searchRequest) toast(e.message);
+    if (request !== searchRequest) return;
+    toast(e.message);
+    if ($("#results"))
+      $("#results").innerHTML = empty(
+        "Não foi possível concluir a pesquisa",
+        "Verifique a configuração e tente novamente.",
+      );
   }
-  if (
-    request === searchRequest &&
-    $("#results")?.textContent.includes("Consultando")
-  )
-    $("#results").innerHTML = empty(
-      "Não foi possível concluir a pesquisa",
-      "Verifique a configuração e tente novamente.",
-    );
 }
 function searchMore() {
   doSearch({ ...searchArgs, pageToken });
@@ -780,11 +778,13 @@ function configurePlaces() {
   );
   $("#placesform").onsubmit = (e) => {
     e.preventDefault();
-    const key = $("#placeskey").value;
+    const form = e.currentTarget;
+    const input = form.elements.key;
+    const key = input.value;
     run(async () => {
       await api("/integrations/google-places", "PUT", { key });
-      $("#placeskey").value = "";
-      closeModal();
+      input.value = "";
+      if ($("#placesform") === form && !$("#modal").hidden) closeModal();
       results = [];
       pageToken = "";
       await refresh();
