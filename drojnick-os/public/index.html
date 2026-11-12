@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DROJNICK OS — Seu próximo negócio começa aqui</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <aside id="sidebar">
+      <a class="brand" href="#overview"
+        ><span class="brand-icon">D</span
+        ><span>DROJNICK <b>OS</b><small>BUSINESS WORKSPACE</small></span></a
+      >
+      <div class="workspace">
+        <span class="avatar">D</span>
+        <div>Workspace DROJNICK<small>Seu centro de operações</small></div>
+        <span>⌄</span>
+      </div>
+      <div id="nav"></div>
+      <div class="side-bottom">
+        <div class="system"><i></i> Operação local disponível</div>
+        <small>Criado por DROJNICK</small>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-button" id="collapse" aria-label="Recolher menu">
+          ☰
+        </button>
+        <div class="breadcrumb">
+          Workspace <span>/</span> <b id="crumb">Visão geral</b>
+        </div>
+        <button class="search-shortcut" onclick="location.hash = 'crm'">
+          ⌕ <span>Buscar no workspace...</span> <kbd>⌘ K</kbd></button
+        ><span class="top-divider"></span
+        ><button class="icon-button" id="notifications" aria-label="Atividades">
+          ♧</button
+        ><button id="account" class="avatar">D</button>
+      </header>
+      <main id="content"></main>
+      <footer class="app-footer">
+        DROJNICK OS
+        <span>Feito para transformar oportunidades em negócios.</span
+        ><span>v1.0 · Criado por DROJNICK</span>
+      </footer>
+    </div>
+    <div id="modal" class="modal-overlay" hidden></div>
+    <div id="toast" role="status"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>
