@@ -1065,11 +1065,13 @@ td button {
 .workspace {
   flex-shrink: 0;
 }
-body.sidebar-collapsed aside {
-  display: none;
-}
-body.sidebar-collapsed .main {
-  margin-left: 0;
+@media (min-width: 801px) {
+  body.sidebar-collapsed aside {
+    display: none;
+  }
+  body.sidebar-collapsed .main {
+    margin-left: 0;
+  }
 }
 @media (min-width: 801px) {
   #collapse {

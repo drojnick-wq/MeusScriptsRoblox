@@ -98,17 +98,60 @@ function toast(t) {
   clearTimeout(window.tt);
   window.tt = setTimeout(() => ($("#toast").style.display = "none"), 6000);
 }
+let dialogTrigger;
+function nameControls(root = document) {
+  root.querySelectorAll("label").forEach((label, i) => {
+    const control =
+      label.querySelector("input,select,textarea") || label.nextElementSibling;
+    if (control?.matches("input,select,textarea")) {
+      if (!control.id) control.id = "control-" + crypto.randomUUID();
+      label.htmlFor = control.id;
+    }
+  });
+}
 function modal(title, body) {
+  if ($("#modal").hidden) dialogTrigger = document.activeElement;
   $("#modal").hidden = false;
   $("#modal").innerHTML =
     `<section class="modal" role="dialog" aria-modal="true" aria-label="${E(title)}"><div class="modal-top"><h2>${E(title)}</h2><button onclick="closeModal()" aria-label="Fechar">×</button></div>${body}</section>`;
-  $("#modal input")?.focus();
+  nameControls($("#modal"));
+  ($("#modal input") || $("#modal button"))?.focus();
 }
 function closeModal() {
   $("#modal").hidden = true;
+  if (dialogTrigger?.isConnected) dialogTrigger.focus();
 }
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeModal();
+  if (!$("#modal").hidden) {
+    if (e.key === "Escape") {
+      closeModal();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Tab") {
+      const controls = [
+        ...$("#modal").querySelectorAll("button,input,select,textarea,a[href]"),
+      ].filter((x) => !x.disabled && x.getClientRects().length);
+      const first = controls[0],
+        last = controls.at(-1);
+      if (
+        e.shiftKey &&
+        (document.activeElement === first ||
+          !$("#modal").contains(document.activeElement))
+      ) {
+        last?.focus();
+        e.preventDefault();
+      } else if (
+        !e.shiftKey &&
+        (document.activeElement === last ||
+          !$("#modal").contains(document.activeElement))
+      ) {
+        first?.focus();
+        e.preventDefault();
+      }
+    }
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === "k") {
     e.preventDefault();
     location.hash = "crm";
@@ -232,7 +275,7 @@ function overview() {
         .join(
           "",
         )}<div class="funnel-bottom">Taxa de conversão <strong>${conversion}% ↗</strong></div></div>`,
-    )}</div><div class="grid-main">${panel("Oportunidades recentes", "Seu próximo cliente pode estar aqui.", state.leads.length ? leadTable(state.leads.slice(0, 3)) : empty("Seu radar está pronto para começar", "Encontre negócios que precisam de uma presença digital."), '<a href="#radar">Ver radar ↗</a>')}${panel("Próximas tarefas", `${state.tasks.filter((t) => !t.done).length} atividades pendentes`, taskList(), '<a href="#automations">Ver todas ↗</a>')}</div><h2>Seu próximo passo</h2><div class="quick-grid">${[
+    )}</div><div class="grid-main">${panel("Oportunidades recentes", "Seu próximo cliente pode estar aqui.", state.leads.length ? leadTable(state.leads.slice(0, 3)) : empty("Seu radar está pronto para começar", "Encontre negócios que precisam de uma presença digital."), '<a href="#radar">Ver radar ↗</a>')}${panel("Próximas tarefas", `${state.tasks.filter((t) => !t.done).length} atividades pendentes`, taskList(5), '<a href="#automations">Ver todas ↗</a>')}</div><h2>Seu próximo passo</h2><div class="quick-grid">${[
       ["radar", "⌖", "Encontrar empresas", "Explore novas oportunidades"],
       ["generator", "✧", "Criar um site", "Transforme uma ideia em projeto"],
       ["proposals", "▤", "Preparar proposta", "Dê o próximo passo na venda"],
@@ -268,10 +311,10 @@ function chartPeriod(el, d) {
   el.classList.add("active");
   $("#sales-chart").outerHTML = salesChart(d);
 }
-function taskList() {
+function taskList(limit = state.tasks.length) {
   return state.tasks.length
     ? state.tasks
-        .slice(0, 5)
+        .slice(0, limit)
         .map(
           (t) =>
             `<label class="list-item"><input type="checkbox" ${t.done ? "checked" : ""} onchange="toggleTask('${t.id}',this.checked)">${E(t.title)}</label>`,
@@ -334,14 +377,17 @@ function safeLink(s) {
   }
 }
 let searchArgs;
+let searchRequest = 0;
 async function doSearch(args) {
+  const request = ++searchRequest;
   if (!need()) return;
   $("#results").innerHTML = empty(
     "Consultando a fonte...",
     "Aguarde alguns instantes.",
   );
-  await run(async () => {
+  try {
     const d = await api("/search", "POST", args);
+    if (request !== searchRequest) return;
     results = args.pageToken
       ? [
           ...results,
@@ -351,9 +397,14 @@ async function doSearch(args) {
         ]
       : d.businesses;
     pageToken = d.nextPageToken || "";
-    $("#results").innerHTML = resultCards();
-  });
-  if ($("#results").textContent.includes("Consultando"))
+    if ($("#results")) $("#results").innerHTML = resultCards();
+  } catch (e) {
+    if (request === searchRequest) toast(e.message);
+  }
+  if (
+    request === searchRequest &&
+    $("#results")?.textContent.includes("Consultando")
+  )
     $("#results").innerHTML = empty(
       "Não foi possível concluir a pesquisa",
       "Verifique a configuração e tente novamente.",
@@ -363,22 +414,30 @@ function searchMore() {
   doSearch({ ...searchArgs, pageToken });
 }
 function saveResult(i) {
+  const result = results[i];
+  if (result.source === "Google Places") {
+    manualLead(result.providerId);
+    return;
+  }
   run(async () => {
-    await api("/leads", "POST", results[i]);
+    await api("/leads", "POST", result);
     await refresh();
     toast("Lead salvo no CRM.");
   });
 }
-function manualLead() {
+function manualLead(providerId = "") {
   if (!need()) return;
   modal(
     "Cadastrar estabelecimento",
-    `<p>Use dados fornecidos pelo estabelecimento ou uma fonte pública identificável.</p><form id="leadform"><label>Nome</label><input name="name" required><div class="form-grid"><div><label>Categoria</label><input name="category" value="Restaurante"></div><div><label>Telefone com DDD</label><input name="phone"></div></div><label>Endereço</label><input name="address"><label>Website</label><input name="website"><label>Fonte dos dados</label><input name="source" value="Cadastro manual" required><button class="primary">Salvar lead</button></form>`,
+    `<p>Use dados fornecidos pelo estabelecimento ou outra fonte autorizada. Os campos do Google não são copiados para o cadastro; apenas seu identificador é associado.</p><form id="leadform"><label>Nome</label><input name="name" required><div class="form-grid"><div><label>Categoria</label><input name="category" value="Restaurante"></div><div><label>Telefone com DDD</label><input name="phone"></div></div><label>Endereço</label><input name="address"><label>Website</label><input name="website"><label>Fonte dos dados</label><input name="source" value="Cadastro manual" required><button class="primary">Salvar lead</button></form>`,
   );
   $("#leadform").onsubmit = (e) => {
     e.preventDefault();
     run(async () => {
-      await api("/leads", "POST", Object.fromEntries(new FormData(e.target)));
+      await api("/leads", "POST", {
+        ...Object.fromEntries(new FormData(e.target)),
+        ...(providerId ? { providerId } : {}),
+      });
       closeModal();
       await refresh();
       toast("Lead salvo.");
@@ -583,10 +642,19 @@ function recordSale(id) {
 }
 function saveSale(id, paid) {
   run(async () => {
-    await api("/sales", "POST", { proposalId: id, paid });
+    const existing = state.sales.find((s) => s.proposalId === id);
+    if (existing) {
+      if (paid) await api("/sales/" + existing.id + "/receipt", "POST");
+    } else await api("/sales", "POST", { proposalId: id, paid });
     closeModal();
     await refresh();
-    toast("Venda registrada e tarefa de entrega criada.");
+    toast(
+      existing
+        ? paid
+          ? "Recebimento confirmado."
+          : "Venda já registrada."
+        : "Venda registrada e tarefa de entrega criada.",
+    );
   });
 }
 function crm(analysis = false) {
@@ -609,7 +677,7 @@ function kanban(leads) {
           .filter((l) => l.status === s)
           .map(
             (l) =>
-              `<article class="lead-card" draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${l.id}')" onclick="leadDetail('${l.id}')"><strong>${E(l.name)}</strong><p>${E(l.category)} · ${l.analysis ? "Oportunidade " + l.analysis.score + "/100" : "Análise pendente"}</p><span class="pill">${l.demo ? "Demonstração" : E(l.source)}</span></article>`,
+              `<article class="lead-card" draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${l.id}')" ><button type="button" onclick="leadDetail('${l.id}')">Abrir lead</button><strong>${E(l.name)}</strong><p>${E(l.category)} · ${l.analysis ? "Oportunidade " + l.analysis.score + "/100" : "Análise pendente"}</p><span class="pill">${l.demo ? "Demonstração" : E(l.source)}</span></article>`,
           )
           .join("")}</section>`,
     )
@@ -715,6 +783,7 @@ function configurePlaces() {
     const key = $("#placeskey").value;
     run(async () => {
       await api("/integrations/google-places", "PUT", { key });
+      $("#placeskey").value = "";
       closeModal();
       results = [];
       pageToken = "";
@@ -808,7 +877,15 @@ function render() {
         panel(
           "Seus clientes",
           "",
-          leadTable(state.leads.filter((l) => l.status === "Fechado")),
+          leadTable(
+            state.leads.filter((l) =>
+              state.sales.some((s) =>
+                state.proposals.some(
+                  (p) => p.id === s.proposalId && p.leadId === l.id,
+                ),
+              ),
+            ),
+          ),
         );
       break;
     case "contracts":
@@ -828,6 +905,7 @@ function render() {
       html = overview();
   }
   $("#content").innerHTML = html;
+  nameControls($("#content"));
   if ($("#searchform"))
     $("#searchform").onsubmit = (e) => {
       e.preventDefault();
@@ -855,19 +933,22 @@ function render() {
         d.published = d.published === "true";
         d.official = d.official === "true";
         d.products = d.products.trim()
-          ? d.products.split("\n").map((line) => {
-              const [name, price] = line.split("|");
-              if (
-                !name?.trim() ||
-                !price?.trim() ||
-                !Number.isFinite(Number(price.trim().replace(",", ".")))
-              )
-                throw Error("Use o formato Nome | preço em cada linha.");
-              return {
-                name: name.trim(),
-                price: Number(price.trim().replace(",", ".")),
-              };
-            })
+          ? d.products
+              .trim()
+              .split("\n")
+              .map((line) => {
+                const [name, price] = line.split("|");
+                if (
+                  !name?.trim() ||
+                  !price?.trim() ||
+                  !Number.isFinite(Number(price.trim().replace(",", ".")))
+                )
+                  throw Error("Use o formato Nome | preço em cada linha.");
+                return {
+                  name: name.trim(),
+                  price: Number(price.trim().replace(",", ".")),
+                };
+              })
           : [];
         await api("/projects/" + route.split("/")[1], "PUT", d);
         await refresh();

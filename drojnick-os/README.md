@@ -29,7 +29,38 @@ Para variáveis locais: copie .env.example para .env, configure somente no ambie
 9. Mova o lead no Kanban ou altere a etapa no formulário. Registre negociação e venda pela proposta. O financeiro considera apenas registros reais da conta, incluindo confirmações manuais explicitamente identificadas.
 10. A venda cria uma tarefa de entrega. No editor, escolha publicação definitiva somente após aprovação do conteúdo.
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:2dca0178b9533e7680b1e3b61f656c3a88c57ccb0194797625a93391a1d9869a -->
+
 ## Configuração e publicação
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:d23d82ffe072b9c23a5459fe671aefeddf450dec45de4d60f8987f379d72195e -->
+
+Produção atrás de proxy com terminação TLS exige TRUSTED_PROXY_IP configurado com o IP exato do proxy que conecta diretamente ao aplicativo, para o cookie Secure de sessão funcionar. Sem essa variável, cabeçalhos de proxy não são confiados. Use 127.0.0.1 ou ::1 somente se o proxy estiver no mesmo host. A topologia externa não foi verificada neste ambiente.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:5517f696c613424d7261a32f7e9f79eca12dbaa433990de8f79e1bf8da742e9e -->
+
+PLACES_DAILY_LIMIT define o limite global diário de requisições Places (padrão 100, UTC), persistente no SQLite e compartilhado por contas e IPs. PLACES_ACCOUNT_DAILY_LIMIT limita cada conta (padrão 20); a reserva dos dois limites é atômica e uma conta bloqueada não consome o limite global.
+
+<!-- /coderabbit-ai-generated:v1 --> Tentativas ao provedor, inclusive falhas, consomem o limite. Configure também quotas no projeto Google Cloud e alertas de orçamento antes de habilitar uma chave. Orçamentos do Google são alertas, não garantias de interrupção de cobrança. A quota externa exige acesso administrativo ao projeto e não foi configurada nesta entrega.
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:be0907f749983fb11b05369968e6cca98cf38d65725f2ff41ba68b2279c74519 -->
+
+Dados do Google Places são temporários na busca. Salvar abre um cadastro vazio para informar identidade e contato obtidos diretamente da empresa ou de outra fonte autorizada; apenas o place ID é associado. O servidor rejeita cadastros com conteúdo declarado como proveniente do Google. Não há licença adicional de armazenamento configurada.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 - PORT: porta HTTP, padrão 3000.
 - DATA_DIR: diretório persistente do SQLite e segredo local de sessão, padrão data/.

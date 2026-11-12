@@ -28,6 +28,8 @@ async function startServer() {
       env: {
         ...process.env,
         PORT: "3199",
+        PLACES_DAILY_LIMIT: "100",
+        PLACES_ACCOUNT_DAILY_LIMIT: "20",
         DATA_DIR: dir,
         GOOGLE_PLACES_API_KEY: "",
         OPENAI_API_KEY: "",
@@ -315,7 +317,7 @@ test("complete persistent flow and account isolation", async (t) => {
         errorOutput += data;
       });
       const exitCode = await new Promise((resolve) =>
-        insecure.once("exit", resolve),
+        insecure.once("close", resolve),
       );
       assert.notEqual(exitCode, 0);
       assert.match(errorOutput, /Integration key file must not be accessible/);
@@ -376,6 +378,111 @@ test("complete persistent flow and account isolation", async (t) => {
         ).status,
         503,
       );
+    },
+  );
+  await t.test(
+    "receipt ownership, no-store, Places storage and quota",
+    async () => {
+      assert.equal(
+        (await req("/api/state")).headers.get("cache-control"),
+        "no-store",
+      );
+      const sale = JSON.parse((await req("/api/state")).body).sales[0];
+      const { DatabaseSync } = require("node:sqlite");
+      const db = new DatabaseSync(path.join(dir, "app.sqlite"));
+      const row = db
+        .prepare("SELECT data FROM records WHERE id=?")
+        .get(sale.id);
+      db.prepare("UPDATE records SET data=? WHERE id=?").run(
+        JSON.stringify({ ...JSON.parse(row.data), paid: false }),
+        sale.id,
+      );
+      assert.equal(
+        (await req("/api/sales/" + sale.id + "/receipt", "POST", null, cookie2))
+          .status,
+        404,
+      );
+      assert.equal(
+        (await req("/api/sales/" + sale.id + "/receipt", "POST")).status,
+        200,
+      );
+      assert.equal(
+        JSON.parse((await req("/api/state")).body).sales[0].paid,
+        true,
+      );
+      assert.equal(
+        (
+          await req("/api/leads", "POST", {
+            name: "Google name",
+            source: "Google Places",
+            providerId: "storage-test",
+          })
+        ).status,
+        422,
+      );
+      const leadResult = JSON.parse(
+        (
+          await req("/api/leads", "POST", {
+            name: "Verified business",
+            source: "Cadastro manual",
+            providerId: "storage-test",
+            phone: "21999999999",
+          })
+        ).body,
+      );
+      assert.equal(leadResult.name, "Verified business");
+      const otherProject = JSON.parse(
+        (await req("/api/projects", "POST", { leadId: leadResult.id })).body,
+      );
+      const otherProposal = JSON.parse(
+        (await req("/api/proposals", "POST", { projectId: otherProject.id }))
+          .body,
+      );
+      db.exec(
+        `CREATE TRIGGER fail_task BEFORE INSERT ON records WHEN NEW.kind='tasks' BEGIN SELECT RAISE(ABORT,'test failure'); END;`,
+      );
+      assert.equal(
+        (
+          await req("/api/sales", "POST", {
+            proposalId: otherProposal.id,
+            paid: false,
+          })
+        ).status,
+        500,
+      );
+      assert.ok(
+        !JSON.parse((await req("/api/state")).body).sales.some(
+          (x) => x.proposalId === otherProposal.id,
+        ),
+      );
+      db.exec("DROP TRIGGER fail_task");
+      await req("/api/integrations/google-places", "PUT", {
+        key: "synthetic-account-key",
+      });
+      db.prepare("INSERT OR REPLACE INTO places_usage VALUES(?,100)").run(
+        new Date().toISOString().slice(0, 10),
+      );
+      assert.equal(
+        (
+          await req("/api/search", "POST", {
+            category: "Restaurante",
+            city: "Rio",
+          })
+        ).status,
+        429,
+      );
+      assert.equal(
+        (
+          await req(
+            "/api/search",
+            "POST",
+            { category: "Restaurante", city: "Rio" },
+            cookie2,
+          )
+        ).status,
+        503,
+      );
+      db.close();
     },
   );
   await t.test("login and logout are real", async () => {

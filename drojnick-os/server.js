@@ -16,7 +16,7 @@ const db = new DatabaseSync(
   path.join(process.env.DATA_DIR || "data", "app.sqlite"),
 );
 db.exec(
-  `PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT UNIQUE,name TEXT,password TEXT); CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,owner TEXT NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL,created TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_owner_kind ON records(owner,kind); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,data TEXT,expires INTEGER); CREATE TABLE IF NOT EXISTS integration_secrets(owner TEXT NOT NULL,provider TEXT NOT NULL,encrypted TEXT NOT NULL,PRIMARY KEY(owner,provider));`,
+  `PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS places_account_usage(day TEXT,owner TEXT,count INTEGER NOT NULL,PRIMARY KEY(day,owner)); CREATE TABLE IF NOT EXISTS places_usage(day TEXT PRIMARY KEY,count INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT UNIQUE,name TEXT,password TEXT); CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,owner TEXT NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL,created TEXT NOT NULL); CREATE INDEX IF NOT EXISTS records_owner_kind ON records(owner,kind); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,data TEXT,expires INTEGER); CREATE TABLE IF NOT EXISTS integration_secrets(owner TEXT NOT NULL,provider TEXT NOT NULL,encrypted TEXT NOT NULL,PRIMARY KEY(owner,provider));`,
 );
 class Store extends session.Store {
   get(id, cb) {
@@ -121,7 +121,10 @@ function hasPersonalGoogleKey(owner) {
     .prepare("SELECT 1 FROM integration_secrets WHERE owner=? AND provider=?")
     .get(owner, "google-places");
 }
-app.set("trust proxy", 1);
+const trustedProxy = process.env.TRUSTED_PROXY_IP;
+if (trustedProxy && !require("node:net").isIP(trustedProxy))
+  throw new Error("TRUSTED_PROXY_IP must be an exact proxy IP address");
+app.set("trust proxy", trustedProxy || false);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "200kb" }));
 app.use(
@@ -232,6 +235,7 @@ app.use("/api", (q, s, n) =>
 );
 app.get("/api/state", (q, s) => {
   const o = q.session.user.id;
+  s.set("Cache-Control", "no-store");
   s.json(
     Object.fromEntries(
       ["leads", "projects", "proposals", "sales", "tasks", "activities"].map(
@@ -318,6 +322,45 @@ app.post("/api/search", async (q, s) => {
         error:
           "Google Places não configurado. Configure a chave em Configurações ou use o modo demonstração.",
       });
+    const cap = Number(process.env.PLACES_DAILY_LIMIT || 100);
+    if (!Number.isSafeInteger(cap) || cap < 1)
+      throw Object.assign(new Error("Quota diária inválida"), { status: 503 });
+    const accountCap = Number(process.env.PLACES_ACCOUNT_DAILY_LIMIT || 20);
+    if (!Number.isSafeInteger(accountCap) || accountCap < 1)
+      throw Object.assign(new Error("Quota de conta inválida"), {
+        status: 503,
+      });
+    const day = new Date().toISOString().slice(0, 10),
+      owner = q.session.user.id;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const account = db
+        .prepare(
+          "INSERT INTO places_account_usage VALUES(?,?,1) ON CONFLICT(day,owner) DO UPDATE SET count=count+1 WHERE count<? RETURNING count",
+        )
+        .get(day, owner, accountCap);
+      if (!account) {
+        db.exec("ROLLBACK");
+        return s
+          .status(429)
+          .json({ error: "Limite diário de pesquisas desta conta atingido." });
+      }
+      const budget = db
+        .prepare(
+          "INSERT INTO places_usage VALUES(?,1) ON CONFLICT(day) DO UPDATE SET count=count+1 WHERE count<? RETURNING count",
+        )
+        .get(day, cap);
+      if (!budget) {
+        db.exec("ROLLBACK");
+        return s
+          .status(429)
+          .json({ error: "Limite diário global de pesquisas atingido." });
+      }
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
     const r = await fetch(
       "https://places.googleapis.com/v1/places:searchText",
       {
@@ -384,8 +427,15 @@ const leadSchema = z.object({
   maps: z.string().optional(),
 });
 app.post("/api/leads", (q, s) => {
-  const d = leadSchema.parse(q.body),
-    o = q.session.user.id;
+  let d = leadSchema.parse(q.body);
+  if (/google/i.test(d.source))
+    return s.status(422).json({
+      error:
+        "Cadastre nome e contato obtidos diretamente com a empresa ou outra fonte autorizada, preservando apenas o identificador Places.",
+    });
+  const { rating, reviews, queriedAt, maps, ...persistent } = d;
+  d = persistent;
+  const o = q.session.user.id;
   const old = list(o, "leads").find(
     (l) => d.providerId && l.providerId === d.providerId,
   );
@@ -585,22 +635,50 @@ app.post("/api/sales", (q, s) => {
   if (!p) return s.sendStatus(404);
   if (list(o, "sales").some((x) => x.proposalId === p.id))
     return s.status(409).json({ error: "Venda já registrada" });
-  s.json(
-    save(o, "sales", {
+  const l = get(o, "leads", p.leadId);
+  if (!l) return s.status(409).json({ error: "Lead da proposta indisponível" });
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const sale = save(o, "sales", {
       proposalId: p.id,
       name: p.name,
       amount: p.amount,
       paid: b.paid,
       confirmation: b.paid ? "Confirmação manual do usuário" : "Pendente",
-    }),
-  );
-  const l = get(o, "leads", p.leadId);
-  save(o, "leads", { ...l, status: "Fechado" }, l.id);
-  save(o, "tasks", {
-    title: `Entregar ${p.name}: revisar conteúdo, domínio e publicação`,
-    done: false,
-  });
-  audit(o, `Venda registrada manualmente: ${p.name}`);
+    });
+    save(o, "leads", { ...l, status: "Fechado" }, l.id);
+    save(o, "tasks", {
+      title: `Entregar ${p.name}: revisar conteúdo, domínio e publicação`,
+      done: false,
+    });
+    audit(o, `Venda registrada manualmente: ${p.name}`);
+    db.exec("COMMIT");
+    s.json(sale);
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+});
+app.post("/api/sales/:id/receipt", (q, s) => {
+  const o = q.session.user.id,
+    sale = get(o, "sales", q.params.id);
+  if (!sale) return s.sendStatus(404);
+  if (sale.paid) return s.json(sale);
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const updated = save(
+      o,
+      "sales",
+      { ...sale, paid: true, confirmation: "Confirmação manual do usuário" },
+      sale.id,
+    );
+    audit(o, `Recebimento confirmado manualmente: ${sale.name}`);
+    db.exec("COMMIT");
+    s.json(updated);
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
 });
 app.post("/api/tasks", (q, s) =>
   s.json(

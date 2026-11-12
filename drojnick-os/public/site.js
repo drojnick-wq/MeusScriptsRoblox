@@ -1,8 +1,21 @@
 (async () => {
   const id = document.currentScript.dataset.project,
     p = await (await fetch("/public/project/" + id)).json();
-  let selections = [];
+  let selections = [],
+    invalidQuantity = false;
   function calc() {
+    invalidQuantity = [...document.querySelectorAll("input")].some(
+      (e) =>
+        !Number.isInteger(Number(e.value)) ||
+        Number(e.value) < 0 ||
+        Number(e.value) > 99,
+    );
+    if (invalidQuantity) {
+      selections = [];
+      document.querySelector("#total").textContent =
+        "Informe quantidades inteiras de 0 a 99.";
+      return;
+    }
     selections = [...document.querySelectorAll("input")].map((e, i) => ({
       name: p.products[i].name,
       price: p.products[i].price,
@@ -15,6 +28,8 @@
   document.querySelectorAll("input").forEach((e) => (e.oninput = calc));
   calc();
   document.querySelector("#order").onclick = () => {
+    calc();
+    if (invalidQuantity) return;
     let phone = p.phone.replace(/\D/g, "");
     if (phone.length === 10 || phone.length === 11) phone = "55" + phone;
     const items = selections.filter((x) => x.qty);
